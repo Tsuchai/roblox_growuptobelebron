@@ -271,6 +271,9 @@ function ShooterManager.SpawnShootersForPlayer(player: Player)
         
         startShootingLoop(player, model)
     end
+
+    -- Recalculate the displayed passive rate now that all shooters are in place
+    ShooterManager.RecalculatePassiveRate(player)
 end
 
 -- Spawns a single shooter dynamically (e.g. when bought) to avoid resetting others
@@ -290,6 +293,9 @@ function ShooterManager.SpawnSingleShooter(player: Player, tier: string, id: str
     
     startShootingLoop(player, model)
     print("Spawned new " .. tier .. " with ID " .. id .. " for " .. player.Name)
+
+    -- Recalculate passive rate to reflect the new shooter
+    ShooterManager.RecalculatePassiveRate(player)
 end
 
 -- Server listener for moving shooters
@@ -336,7 +342,161 @@ local function handleMoveShooter(player: Player, shooterModel: Model, commandOrP
         local lookTarget = rim and rim.Position or (plotCenter + Vector3.new(0, 2.5, -31))
         
         root.CFrame = CFrame.new(finalPos, Vector3.new(lookTarget.X, finalPos.Y, lookTarget.Z))
+
+        -- Zone may have changed after moving — recalculate the accurate passive rate
+        ShooterManager.RecalculatePassiveRate(player)
     end
+end
+
+-- Calculates each shooter's expected cash/sec based on its actual zone, attribute bonus,
+-- hoop multiplier, and rebirth multiplier, then syncs the total to the PassiveRate
+-- player attribute for the client HUD and active bonus label.
+function ShooterManager.RecalculatePassiveRate(player: Player)
+    local plot = PlotManager.GetPlotForPlayer(player)
+    local data = DataManager.Get(player)
+    if not plot or not data then
+        player:SetAttribute("PassiveRate", 0)
+        return
+    end
+
+    local shootersFolder = plot:FindFirstChild("Shooters") :: Folder?
+    local hoop = plot:FindFirstChild("Hoop")
+    local rim = hoop and hoop:FindFirstChild("Rim") :: BasePart?
+    if not shootersFolder or not rim then
+        player:SetAttribute("PassiveRate", 0)
+        return
+    end
+
+    local totalRate = 0
+
+    for _, shooterModel in ipairs(shootersFolder:GetChildren()) do
+        if not shooterModel:IsA("Model") then continue end
+        local tier = shooterModel:GetAttribute("ShooterTier") :: string?
+        if not tier then continue end
+
+        local cfg = Config.Shooters[tier]
+        local root = shooterModel.PrimaryPart
+        if not cfg or not root then continue end
+
+        local distance = (root.Position - rim.Position).Magnitude
+        local zone = Config.GetDistanceZone(distance)
+
+        local accuracy   = zone.BaseAccuracy
+        local multiplier = zone.Multiplier
+
+        local attrCfg = cfg.Attribute and Config.Attributes[cfg.Attribute]
+        if attrCfg then
+            if zone.Name == "Paint" and attrCfg.PaintAccuracyBonus then
+                accuracy   += attrCfg.PaintAccuracyBonus
+                multiplier *= (attrCfg.PaintMultiplier or 1)
+            elseif zone.Name == "Mid-Range" and attrCfg.MidRangeAccuracyBonus then
+                accuracy   += attrCfg.MidRangeAccuracyBonus
+                multiplier *= (attrCfg.MidRangeMultiplier or 1)
+            elseif zone.Name == "3-Point Line" and attrCfg.ThreePointAccuracyBonus then
+                accuracy   += attrCfg.ThreePointAccuracyBonus
+                multiplier *= (attrCfg.ThreePointMultiplier or 1)
+            end
+        end
+
+        accuracy = math.clamp(accuracy, 0, 1)
+
+        -- Expected cash/sec = (BaseYield × zoneMult × accuracy) / cooldown
+        totalRate += (cfg.BaseYield * multiplier * accuracy) / cfg.Cooldown
+    end
+
+    -- Apply hoop multiplier
+    local hoopLevel = data.HoopUpgradeLevel or 1
+    local hoopCfg = Config.Hoops[hoopLevel]
+    if hoopCfg then totalRate *= hoopCfg.Multiplier end
+
+    -- Apply rebirth multiplier
+    local rebirths = data.Rebirths or 0
+    totalRate *= (1 + Config.Rebirth.MultiplierPerRebirth * rebirths)
+
+    player:SetAttribute("PassiveRate", totalRate)
+end
+
+-- Equips a shooter from inventory
+local function handleEquipShooter(player: Player, tier: string): (boolean, string)
+    local data = DataManager.Get(player)
+    if not data then return false, "No player data" end
+    
+    local maxActive = Config.MaxActiveShooters or 5
+    if #data.ShooterPositions >= maxActive then
+        return false, "Court is full! Max " .. maxActive .. " shooters."
+    end
+    
+    local owned = data.OwnedShooters and data.OwnedShooters[tier] or 0
+    if owned <= 0 then
+        return false, "You don't own any " .. tier .. " shooters!"
+    end
+    
+    local equippedCount = 0
+    for _, item in ipairs(data.ShooterPositions) do
+        if item.Tier == tier then
+            equippedCount += 1
+        end
+    end
+    
+    if equippedCount >= owned then
+        return false, "All owned " .. tier .. " shooters are already equipped!"
+    end
+    
+    local id = game:GetService("HttpService"):GenerateGUID(false)
+    local existingCount = #data.ShooterPositions
+    
+    local offsetMultiplierX = (existingCount % 3) - 1
+    local offsetMultiplierZ = math.floor(existingCount / 3)
+    local relativePos = Vector3.new(
+        offsetMultiplierX * 12,
+        2.0,
+        15 - (offsetMultiplierZ * 15)
+    )
+    
+    DataManager.AddShooterPosition(player, id, tier, relativePos)
+    ShooterManager.SpawnSingleShooter(player, tier, id, relativePos)
+    
+    return true, "Equipped " .. tier
+end
+
+local function handleUnequipShooter(player: Player, id: string): (boolean, string)
+    local data = DataManager.Get(player)
+    if not data then return false, "No player data" end
+    
+    local foundTier = nil
+    for _, item in ipairs(data.ShooterPositions) do
+        if item.Id == id then
+            foundTier = item.Tier
+            break
+        end
+    end
+    
+    if not foundTier then
+        return false, "Shooter not found on court."
+    end
+    
+    DataManager.RemoveShooterPosition(player, id)
+    
+    local plot = PlotManager.GetPlotForPlayer(player)
+    if plot then
+        local shootersFolder = plot:FindFirstChild("Shooters") :: Folder
+        if shootersFolder then
+            for _, child in ipairs(shootersFolder:GetChildren()) do
+                if child:GetAttribute("ShooterId") == id then
+                    if activeShooterLoops[child] then
+                        task.cancel(activeShooterLoops[child])
+                        activeShooterLoops[child] = nil
+                    end
+                    child:Destroy()
+                    break
+                end
+            end
+        end
+    end
+    
+    ShooterManager.RecalculatePassiveRate(player)
+    
+    return true, "Unequipped shooter."
 end
 
 function ShooterManager.Initialize()
@@ -344,12 +504,17 @@ function ShooterManager.Initialize()
     task.spawn(function()
         local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
         local moveEvent = remotes:WaitForChild("MoveShooter") :: RemoteEvent
+        local equipFunc = remotes:WaitForChild("EquipShooter") :: RemoteFunction
+        local unequipFunc = remotes:WaitForChild("UnequipShooter") :: RemoteFunction
         
         moveEvent.OnServerEvent:Connect(function(player, shooterModel, commandOrPosition)
             if typeof(shooterModel) == "Instance" and shooterModel:IsA("Model") then
                 handleMoveShooter(player, shooterModel, commandOrPosition)
             end
         end)
+        
+        equipFunc.OnServerInvoke = handleEquipShooter
+        unequipFunc.OnServerInvoke = handleUnequipShooter
     end)
     
     -- Automatically spawn shooters when data loads

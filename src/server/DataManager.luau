@@ -35,13 +35,39 @@ local profiles: { [Player]: any } = {}
 -- Used both for offline earnings and by NetworkManager for the manual shot bonus.
 local function calculatePassiveRate(data: any): number
     local rate = 0
-    if not data.OwnedShooters then return 0 end
+    if not data.ShooterPositions then return 0 end
+    
+    local rimRelativePos = Vector3.new(0, 2.5, -31)
 
-    for tier, count in pairs(data.OwnedShooters) do
-        if count > 0 then
+    for _, item in ipairs(data.ShooterPositions) do
+        local tier = item.Tier
+        local posArray = item.Pos
+        if tier and posArray and #posArray == 3 then
+            local pos = Vector3.new(posArray[1], posArray[2], posArray[3])
+            local distance = (pos - rimRelativePos).Magnitude
+            local zone = Config.GetDistanceZone(distance)
+            
+            local accuracy = zone.BaseAccuracy
+            local multiplier = zone.Multiplier
+            
             local cfg = Config.Shooters[tier]
             if cfg then
-                rate += (cfg.BaseYield / cfg.Cooldown) * count
+                local attrCfg = cfg.Attribute and Config.Attributes[cfg.Attribute]
+                if attrCfg then
+                    if zone.Name == "Paint" and attrCfg.PaintAccuracyBonus then
+                        accuracy += attrCfg.PaintAccuracyBonus
+                        multiplier *= (attrCfg.PaintMultiplier or 1)
+                    elseif zone.Name == "Mid-Range" and attrCfg.MidRangeAccuracyBonus then
+                        accuracy += attrCfg.MidRangeAccuracyBonus
+                        multiplier *= (attrCfg.MidRangeMultiplier or 1)
+                    elseif zone.Name == "3-Point Line" and attrCfg.ThreePointAccuracyBonus then
+                        accuracy += attrCfg.ThreePointAccuracyBonus
+                        multiplier *= (attrCfg.ThreePointMultiplier or 1)
+                    end
+                end
+                
+                accuracy = math.clamp(accuracy, 0, 1)
+                rate += (cfg.BaseYield * multiplier * accuracy) / cfg.Cooldown
             end
         end
     end
@@ -135,7 +161,7 @@ local function onPlayerAdded(player: Player)
     local timeAway = 0
     if data.LogoutTime and data.LogoutTime > 0 then
         timeAway = math.max(0, os.time() - data.LogoutTime)
-        if timeAway > 60 then
+        if timeAway > 5 then -- Lowered from 60 for easier testing
             local passiveRate = calculatePassiveRate(data)
             offlineCash = math.floor(passiveRate * timeAway)
             data.Cash += offlineCash
@@ -152,7 +178,9 @@ local function onPlayerAdded(player: Player)
         task.spawn(function()
             local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
             local offlineEvent = remotes:WaitForChild("OfflineEarnings") :: RemoteEvent
-            player.CharacterAdded:Wait()
+            if not player.Character then
+                player.CharacterAdded:Wait()
+            end
             task.wait(2)
             offlineEvent:FireClient(player, offlineCash, timeAway)
         end)
@@ -175,6 +203,15 @@ end
 function DataManager.Initialize()
     Players.PlayerAdded:Connect(onPlayerAdded)
     Players.PlayerRemoving:Connect(onPlayerRemoving)
+    
+    game:BindToClose(function()
+        for player, profile in pairs(profiles) do
+            if profile.Data then
+                profile.Data.LogoutTime = os.time()
+            end
+        end
+    end)
+    
     -- Note: BindToClose is handled internally by ProfileStore (it saves all
     -- active profiles on shutdown automatically).
     print("[Server] DataManager Initialized (ProfileStore)")
@@ -247,6 +284,20 @@ function DataManager.UpdateShooterPosition(player: Player, id: string, relativeP
     for _, item in ipairs(data.ShooterPositions) do
         if item.Id == id then
             item.Pos = { relativePos.X, relativePos.Y, relativePos.Z }
+            break
+        end
+    end
+end
+
+-- Removes a shooter position entry from the player's ShooterPositions list by its Id.
+function DataManager.RemoveShooterPosition(player: Player, id: string)
+    local profile = profiles[player]
+    if not profile then return end
+    local data = profile.Data
+    if not data.ShooterPositions then return end
+    for i, item in ipairs(data.ShooterPositions) do
+        if item.Id == id then
+            table.remove(data.ShooterPositions, i)
             break
         end
     end

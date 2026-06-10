@@ -139,7 +139,7 @@ local function startPlacement(model: Model)
     label.BackgroundTransparency = 1
     label.Font = Enum.Font.FredokaOne
     label.TextScaled = true
-    label.Text = "Relocating...\nClick Court to Place\nRight-Click to Cancel"
+    label.Text = "Relocating...\nClick Court to Place\nRight-Click to Cancel\nPress R to Unequip"
     label.TextColor3 = Color3.fromRGB(255, 255, 100)
     label.Parent = billboard
     
@@ -200,6 +200,31 @@ function PlacementManager.Initialize()
             -- Cancel on Right Click
             if isPlacing then
                 PlacementManager.CancelPlacement()
+            end
+        elseif input.UserInputType == Enum.UserInputType.Keyboard and input.KeyCode == Enum.KeyCode.R then
+            if isPlacing and selectedShooter then
+                local id = selectedShooter:GetAttribute("ShooterId")
+                if id then
+                    local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
+                    local unequipFunc = remotes:WaitForChild("UnequipShooter") :: RemoteFunction
+                    
+                    isPlacing = false
+                    if placementConnection then
+                        placementConnection:Disconnect()
+                        placementConnection = nil
+                    end
+                    
+                    local post = selectedShooter:FindFirstChild("PlacementSign")
+                    if post then post:Destroy() end
+                    
+                    -- Invoke server to unequip
+                    task.spawn(function()
+                        unequipFunc:InvokeServer(id)
+                    end)
+                    
+                    selectedShooter = nil
+                    originalCFrame = nil
+                end
             end
         end
     end)

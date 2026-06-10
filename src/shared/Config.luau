@@ -18,6 +18,10 @@ Config.StartingStats = {
     ShooterPositions = {} -- elements: { Id = string, Tier = string, Pos = {number, number, number} }
 }
 
+-- Maximum number of shooters a player can place on the court
+Config.MaxActiveShooters = 5
+
+
 -- Distance Zones Configuration
 -- Distance measured in Studs from the Hoop Rim center
 Config.DistanceZones = {

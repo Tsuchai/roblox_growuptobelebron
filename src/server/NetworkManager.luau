@@ -48,6 +48,8 @@ local function setupRemotes()
     getOrCreateRemoteEvent("RebirthNotify")
     getOrCreateRemoteFunction("BuyUpgrade")
     getOrCreateRemoteFunction("RebirthRequest")
+    getOrCreateRemoteFunction("EquipShooter")
+    getOrCreateRemoteFunction("UnequipShooter")
 end
 
 -- Active click shooting handler

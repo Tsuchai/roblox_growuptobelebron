@@ -34,11 +34,15 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
             
             DataManager.Set(player, "Cash", currentCash - cost)
             DataManager.AddShooter(player, upgradeName, 1)
-            DataManager.AddShooterPosition(player, id, upgradeName, relativePos)
-            
-            -- Spawn only the new shooter dynamically (keeps others in place!)
-            ShooterManager.SpawnSingleShooter(player, upgradeName, id, relativePos)
-            return true, "Successfully bought " .. upgradeName
+
+            if existingCount < (Config.MaxActiveShooters or 5) then
+                DataManager.AddShooterPosition(player, id, upgradeName, relativePos)
+                -- Spawn only the new shooter dynamically (keeps others in place!)
+                ShooterManager.SpawnSingleShooter(player, upgradeName, id, relativePos)
+                return true, "Successfully bought and equipped " .. upgradeName
+            else
+                return true, "Successfully bought " .. upgradeName .. " (Added to Inventory)"
+            end
         else
             return false, "Not enough Cash!"
         end
@@ -56,6 +60,8 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
         if currentCash >= cost then
             DataManager.Set(player, "Cash", currentCash - cost)
             DataManager.Set(player, "HoopUpgradeLevel", nextLevel)
+            -- Hoop multiplier changed — recalculate the accurate passive rate display
+            ShooterManager.RecalculatePassiveRate(player)
             return true, "Successfully upgraded hoop to " .. nextHoopConfig.Name
         else
             return false, "Not enough Cash!"

@@ -7,6 +7,8 @@ local RunService = game:GetService("RunService")
 local VisualManager = require(script:WaitForChild("VisualManager"))
 local PlacementManager = require(script:WaitForChild("PlacementManager"))
 local ShopUI = require(script:WaitForChild("ShopUI"))
+local TeamUI = require(script:WaitForChild("TeamUI"))
+local MilestoneUI = require(script:WaitForChild("MilestoneUI"))
 local FormatNumber = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("FormatNumber"))
 
 print("[Client] Initializing Grow Up to be LeBron...")
@@ -15,6 +17,8 @@ print("[Client] Initializing Grow Up to be LeBron...")
 VisualManager.Initialize()
 PlacementManager.Initialize()
 ShopUI.Initialize()
+TeamUI.Initialize()
+MilestoneUI.Initialize()
 
 -- 2. Setup Remotes reference
 local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
@@ -47,26 +51,14 @@ uiCorner.Parent = shootButton
 
 -- Main "SHOOT!" label inside the button
 local shootMainLabel = Instance.new("TextLabel")
-shootMainLabel.Size = UDim2.new(1, 0, 0.55, 0)
-shootMainLabel.Position = UDim2.new(0, 0, 0, 4)
+shootMainLabel.Size = UDim2.new(1, 0, 1, 0)
+shootMainLabel.Position = UDim2.new(0, 0, 0, 0)
 shootMainLabel.BackgroundTransparency = 1
 shootMainLabel.Font = Enum.Font.FredokaOne
 shootMainLabel.Text = "SHOOT!"
 shootMainLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 shootMainLabel.TextSize = 26
 shootMainLabel.Parent = shootButton
-
--- Active Bonus sublabel — shows estimated $/click, updates reactively
-local activeBonusLabel = Instance.new("TextLabel")
-activeBonusLabel.Name = "ActiveBonusLabel"
-activeBonusLabel.Size = UDim2.new(1, 0, 0.38, 0)
-activeBonusLabel.Position = UDim2.new(0, 0, 0.58, 0)
-activeBonusLabel.BackgroundTransparency = 1
-activeBonusLabel.Font = Enum.Font.Gotham
-activeBonusLabel.Text = "+$5/click"
-activeBonusLabel.TextColor3 = Color3.fromRGB(255, 230, 150)
-activeBonusLabel.TextSize = 13
-activeBonusLabel.Parent = shootButton
 
 -- Cash Display (top-center HUD)
 local cashFrame = Instance.new("Frame")
@@ -167,56 +159,10 @@ local function updateCashDisplay()
     cashLabel.Text = "$" .. FormatNumber.format(cash)
 end
 
--- Live $/sec rate update (recalculates from shooter attributes every second)
+-- Live $/sec rate update (reads accurate rate calculated by the server)
 local function updateRateDisplay()
-    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-    local rate = 0
-    local tierOrder = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
-    for _, tier in ipairs(tierOrder) do
-        local count = localPlayer:GetAttribute("Shooter_" .. tier) or 0
-        if count > 0 then
-            local cfg = Config.Shooters[tier]
-            if cfg then
-                rate += (cfg.BaseYield / cfg.Cooldown) * count
-            end
-        end
-    end
-    -- Apply hoop multiplier
-    local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
-    local hoopCfg = Config.Hoops[hoopLevel]
-    if hoopCfg then rate *= hoopCfg.Multiplier end
-    -- Apply rebirth multiplier
-    local rebirths = localPlayer:GetAttribute("Rebirths") or 0
-    rate *= (1 + 0.5 * rebirths)
-
-    rateLabel.Text = "$" .. FormatNumber.format(rate) .. "/sec"
-end
-
--- Updates the Active Bonus sublabel on the SHOOT button.
--- Shows estimated cash per click (base, no zone multiplier) from current passive rate + player upgrade.
-local function updateActiveBonusLabel()
-    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
-    local rate = 0
-    local tierOrder = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
-    for _, tier in ipairs(tierOrder) do
-        local count = localPlayer:GetAttribute("Shooter_" .. tier) or 0
-        if count > 0 then
-            local cfg = Config.Shooters[tier]
-            if cfg then rate += (cfg.BaseYield / cfg.Cooldown) * count end
-        end
-    end
-    local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
-    local hoopCfg = Config.Hoops[hoopLevel]
-    if hoopCfg then rate *= hoopCfg.Multiplier end
-    local rebirths = localPlayer:GetAttribute("Rebirths") or 0
-    rate *= (1 + 0.5 * rebirths)
-
-    local passiveBonus = rate * Config.PlayerShot.PassiveScaleFactor
-    local upgradeLevel = localPlayer:GetAttribute("PlayerUpgradeLevel") or 1
-    local upgradeCfg = Config.PlayerUpgrades[upgradeLevel]
-    local upgradeMult = upgradeCfg and upgradeCfg.Multiplier or 1
-    local baseClick = math.max(1, math.floor((Config.PlayerShot.BaseYield + passiveBonus) * upgradeMult))
-    activeBonusLabel.Text = "+$" .. FormatNumber.format(baseClick) .. "/click"
+    local passiveRate = localPlayer:GetAttribute("PassiveRate") or 0
+    rateLabel.Text = "$" .. FormatNumber.format(passiveRate) .. "/sec"
 end
 
 -- Update cash immediately and on any attribute change
@@ -225,107 +171,20 @@ localPlayer.AttributeChanged:Connect(function(attr)
     if attr == "Cash" then
         updateCashDisplay()
     end
-    if attr == "Rebirths" or attr == "HoopUpgradeLevel" or string.match(attr, "^Shooter_")
-        or attr == "PlayerUpgradeLevel" then
+    if attr == "PassiveRate" or attr == "PlayerUpgradeLevel" then
         updateRateDisplay()
-        updateActiveBonusLabel()
     end
 end)
 
--- Poll $/sec and active bonus once per second (handles initial load + passive changes)
-updateActiveBonusLabel()
+-- Poll $/sec once per second (handles initial load + passive changes)
 task.spawn(function()
     while true do
         updateRateDisplay()
-        updateActiveBonusLabel()
         task.wait(1)
     end
 end)
 
--- 5. Milestone Popup System
--- Fires a brief top banner the first time Cash crosses each threshold this session.
-local MILESTONES = {1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000}
-local MILESTONE_LABELS: {[number]: string} = {
-    [1000]       = "First $1K! 🔥",
-    [10000]      = "$10K Baller! 💪",
-    [100000]     = "$100K Shot Caller! ⭐",
-    [1000000]    = "$1M Millionaire! 🏆",
-    [10000000]   = "$10M Money Moves! 💸",
-    [100000000]  = "$100M GOAT Status! 👑",
-    [1000000000] = "$1B LEBRON MODE! 🐐",
-}
-local triggeredMilestones: {[number]: boolean} = {}
-
-local function showMilestoneBanner(amount: number)
-    local labelText = MILESTONE_LABELS[amount] or ("$" .. FormatNumber.format(amount) .. " reached!")
-
-    local banner = Instance.new("Frame")
-    banner.Name = "MilestoneBanner"
-    banner.Size = UDim2.new(0, 380, 0, 56)
-    banner.Position = UDim2.new(0.5, -190, 0, -70) -- starts hidden above the screen
-    banner.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
-    banner.BorderSizePixel = 0
-    banner.ZIndex = 10
-    banner.Parent = screenGui
-
-    local bCorner = Instance.new("UICorner")
-    bCorner.CornerRadius = UDim.new(0, 12)
-    bCorner.Parent = banner
-
-    local bStroke = Instance.new("UIStroke")
-    bStroke.Color = Color3.fromRGB(255, 180, 0)
-    bStroke.Thickness = 2
-    bStroke.Parent = banner
-
-    local bLabel = Instance.new("TextLabel")
-    bLabel.Size = UDim2.new(1, -16, 1, 0)
-    bLabel.Position = UDim2.new(0, 8, 0, 0)
-    bLabel.BackgroundTransparency = 1
-    bLabel.Font = Enum.Font.FredokaOne
-    bLabel.Text = labelText
-    bLabel.TextColor3 = Color3.fromRGB(255, 220, 60)
-    bLabel.TextSize = 22
-    bLabel.TextXAlignment = Enum.TextXAlignment.Center
-    bLabel.ZIndex = 11
-    bLabel.Parent = banner
-
-    -- Slide down from above into view (just below the cash HUD)
-    local slideIn = TweenService:Create(banner,
-        TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Position = UDim2.new(0.5, -190, 0, 90)
-        })
-    slideIn:Play()
-
-    -- Auto-dismiss after 2.5 seconds
-    task.delay(2.5, function()
-        local slideOut = TweenService:Create(banner,
-            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-                Position = UDim2.new(0.5, -190, 0, -70)
-            })
-        slideOut:Play()
-        slideOut.Completed:Connect(function()
-            banner:Destroy()
-        end)
-    end)
-end
-
--- Check milestones whenever Cash changes
-localPlayer.AttributeChanged:Connect(function(attr)
-    if attr ~= "Cash" then return end
-    local cash = localPlayer:GetAttribute("Cash") or 0
-    for _, threshold in ipairs(MILESTONES) do
-        if cash >= threshold and not triggeredMilestones[threshold] then
-            triggeredMilestones[threshold] = true
-            showMilestoneBanner(threshold)
-        end
-    end
-end)
-
--- Reset milestones on each rebirth so the climb back up feels rewarding every time
-local rebirthNotify = remotes:WaitForChild("RebirthNotify") :: RemoteEvent
-rebirthNotify.OnClientEvent:Connect(function()
-    triggeredMilestones = {}
-end)
+-- (Milestone logic moved to MilestoneUI.luau)
 
 -- 4. Welcome Back Screen (shown when returning after offline earnings accrued)
 local offlineEvent = remotes:WaitForChild("OfflineEarnings") :: RemoteEvent
