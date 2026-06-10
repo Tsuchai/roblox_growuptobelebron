@@ -60,6 +60,22 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
         else
             return false, "Not enough Cash!"
         end
+        
+    elseif upgradeType == "PlayerUpgrade" then
+        local currentLevel = data.PlayerUpgradeLevel or 1
+        local nextCfg = Config.PlayerUpgrades[currentLevel + 1]
+
+        if not nextCfg then
+            return false, "Player upgrade already maxed!"
+        end
+
+        if currentCash >= nextCfg.Cost then
+            DataManager.Set(player, "Cash", currentCash - nextCfg.Cost)
+            DataManager.Set(player, "PlayerUpgradeLevel", currentLevel + 1)
+            return true, "Upgraded to " .. nextCfg.Name
+        else
+            return false, "Not enough Cash!"
+        end
     end
     
     return false, "Invalid upgrade type"
@@ -87,7 +103,14 @@ local function handleRebirthRequest(player: Player): (boolean, string)
         
         -- Respawn shooters (which clears and resets to empty/rookie)
         ShooterManager.SpawnShootersForPlayer(player)
-        
+
+        -- Notify the client to reset milestone tracking for the new rebirth
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes") :: Folder?
+        local rebirthNotify = remotes and remotes:FindFirstChild("RebirthNotify") :: RemoteEvent?
+        if rebirthNotify then
+            rebirthNotify:FireClient(player)
+        end
+
         return true, "Successfully rebirthed!"
     else
         return false, "Not enough Cash to rebirth!"

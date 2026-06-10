@@ -2,10 +2,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
 
 local VisualManager = require(script:WaitForChild("VisualManager"))
 local PlacementManager = require(script:WaitForChild("PlacementManager"))
 local ShopUI = require(script:WaitForChild("ShopUI"))
+local FormatNumber = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("FormatNumber"))
 
 print("[Client] Initializing Grow Up to be LeBron...")
 
@@ -34,10 +36,7 @@ shootButton.Size = UDim2.new(0, 200, 0, 80)
 shootButton.Position = UDim2.new(0.5, -100, 0.85, -40)
 shootButton.BackgroundColor3 = Color3.fromRGB(255, 110, 0) -- Basketball Orange
 shootButton.BorderSizePixel = 0
-shootButton.Font = Enum.Font.FredokaOne
-shootButton.Text = "SHOOT!"
-shootButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-shootButton.TextSize = 28
+shootButton.Text = "" -- Content handled by child TextLabels
 shootButton.AutoButtonColor = false -- We'll customize the animation ourselves!
 shootButton.Parent = screenGui
 
@@ -45,6 +44,74 @@ shootButton.Parent = screenGui
 local uiCorner = Instance.new("UICorner")
 uiCorner.CornerRadius = UDim.new(0.3, 0)
 uiCorner.Parent = shootButton
+
+-- Main "SHOOT!" label inside the button
+local shootMainLabel = Instance.new("TextLabel")
+shootMainLabel.Size = UDim2.new(1, 0, 0.55, 0)
+shootMainLabel.Position = UDim2.new(0, 0, 0, 4)
+shootMainLabel.BackgroundTransparency = 1
+shootMainLabel.Font = Enum.Font.FredokaOne
+shootMainLabel.Text = "SHOOT!"
+shootMainLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+shootMainLabel.TextSize = 26
+shootMainLabel.Parent = shootButton
+
+-- Active Bonus sublabel — shows estimated $/click, updates reactively
+local activeBonusLabel = Instance.new("TextLabel")
+activeBonusLabel.Name = "ActiveBonusLabel"
+activeBonusLabel.Size = UDim2.new(1, 0, 0.38, 0)
+activeBonusLabel.Position = UDim2.new(0, 0, 0.58, 0)
+activeBonusLabel.BackgroundTransparency = 1
+activeBonusLabel.Font = Enum.Font.Gotham
+activeBonusLabel.Text = "+$5/click"
+activeBonusLabel.TextColor3 = Color3.fromRGB(255, 230, 150)
+activeBonusLabel.TextSize = 13
+activeBonusLabel.Parent = shootButton
+
+-- Cash Display (top-center HUD)
+local cashFrame = Instance.new("Frame")
+cashFrame.Name = "CashDisplay"
+cashFrame.Size = UDim2.new(0, 240, 0, 64)
+cashFrame.Position = UDim2.new(0.5, -120, 0, 16)
+cashFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+cashFrame.BackgroundTransparency = 0.15
+cashFrame.BorderSizePixel = 0
+cashFrame.Parent = screenGui
+
+local cashFrameCorner = Instance.new("UICorner")
+cashFrameCorner.CornerRadius = UDim.new(0, 14)
+cashFrameCorner.Parent = cashFrame
+
+local cashFrameStroke = Instance.new("UIStroke")
+cashFrameStroke.Color = Color3.fromRGB(255, 110, 0)
+cashFrameStroke.Thickness = 2
+cashFrameStroke.Parent = cashFrame
+
+-- Cash amount label
+local cashLabel = Instance.new("TextLabel")
+cashLabel.Name = "CashLabel"
+cashLabel.Size = UDim2.new(1, -12, 0, 36)
+cashLabel.Position = UDim2.new(0, 6, 0, 4)
+cashLabel.BackgroundTransparency = 1
+cashLabel.Font = Enum.Font.FredokaOne
+cashLabel.Text = "$0"
+cashLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+cashLabel.TextSize = 26
+cashLabel.TextXAlignment = Enum.TextXAlignment.Center
+cashLabel.Parent = cashFrame
+
+-- $/sec rate label
+local rateLabel = Instance.new("TextLabel")
+rateLabel.Name = "RateLabel"
+rateLabel.Size = UDim2.new(1, -12, 0, 20)
+rateLabel.Position = UDim2.new(0, 6, 0, 40)
+rateLabel.BackgroundTransparency = 1
+rateLabel.Font = Enum.Font.Gotham
+rateLabel.Text = "$0/sec"
+rateLabel.TextColor3 = Color3.fromRGB(160, 200, 120)
+rateLabel.TextSize = 13
+rateLabel.TextXAlignment = Enum.TextXAlignment.Center
+rateLabel.Parent = cashFrame
 
 -- UI Stroke for premium outline
 local uiStroke = Instance.new("UIStroke")
@@ -92,6 +159,330 @@ end)
 -- Fire shot request on click
 shootButton.MouseButton1Click:Connect(function()
     shootRequest:FireServer()
+end)
+
+-- Live cash display update
+local function updateCashDisplay()
+    local cash = localPlayer:GetAttribute("Cash") or 0
+    cashLabel.Text = "$" .. FormatNumber.format(cash)
+end
+
+-- Live $/sec rate update (recalculates from shooter attributes every second)
+local function updateRateDisplay()
+    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+    local rate = 0
+    local tierOrder = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
+    for _, tier in ipairs(tierOrder) do
+        local count = localPlayer:GetAttribute("Shooter_" .. tier) or 0
+        if count > 0 then
+            local cfg = Config.Shooters[tier]
+            if cfg then
+                rate += (cfg.BaseYield / cfg.Cooldown) * count
+            end
+        end
+    end
+    -- Apply hoop multiplier
+    local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
+    local hoopCfg = Config.Hoops[hoopLevel]
+    if hoopCfg then rate *= hoopCfg.Multiplier end
+    -- Apply rebirth multiplier
+    local rebirths = localPlayer:GetAttribute("Rebirths") or 0
+    rate *= (1 + 0.5 * rebirths)
+
+    rateLabel.Text = "$" .. FormatNumber.format(rate) .. "/sec"
+end
+
+-- Updates the Active Bonus sublabel on the SHOOT button.
+-- Shows estimated cash per click (base, no zone multiplier) from current passive rate + player upgrade.
+local function updateActiveBonusLabel()
+    local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+    local rate = 0
+    local tierOrder = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
+    for _, tier in ipairs(tierOrder) do
+        local count = localPlayer:GetAttribute("Shooter_" .. tier) or 0
+        if count > 0 then
+            local cfg = Config.Shooters[tier]
+            if cfg then rate += (cfg.BaseYield / cfg.Cooldown) * count end
+        end
+    end
+    local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
+    local hoopCfg = Config.Hoops[hoopLevel]
+    if hoopCfg then rate *= hoopCfg.Multiplier end
+    local rebirths = localPlayer:GetAttribute("Rebirths") or 0
+    rate *= (1 + 0.5 * rebirths)
+
+    local passiveBonus = rate * Config.PlayerShot.PassiveScaleFactor
+    local upgradeLevel = localPlayer:GetAttribute("PlayerUpgradeLevel") or 1
+    local upgradeCfg = Config.PlayerUpgrades[upgradeLevel]
+    local upgradeMult = upgradeCfg and upgradeCfg.Multiplier or 1
+    local baseClick = math.max(1, math.floor((Config.PlayerShot.BaseYield + passiveBonus) * upgradeMult))
+    activeBonusLabel.Text = "+$" .. FormatNumber.format(baseClick) .. "/click"
+end
+
+-- Update cash immediately and on any attribute change
+updateCashDisplay()
+localPlayer.AttributeChanged:Connect(function(attr)
+    if attr == "Cash" then
+        updateCashDisplay()
+    end
+    if attr == "Rebirths" or attr == "HoopUpgradeLevel" or string.match(attr, "^Shooter_")
+        or attr == "PlayerUpgradeLevel" then
+        updateRateDisplay()
+        updateActiveBonusLabel()
+    end
+end)
+
+-- Poll $/sec and active bonus once per second (handles initial load + passive changes)
+updateActiveBonusLabel()
+task.spawn(function()
+    while true do
+        updateRateDisplay()
+        updateActiveBonusLabel()
+        task.wait(1)
+    end
+end)
+
+-- 5. Milestone Popup System
+-- Fires a brief top banner the first time Cash crosses each threshold this session.
+local MILESTONES = {1000, 10000, 100000, 1000000, 10000000, 100000000, 1000000000}
+local MILESTONE_LABELS: {[number]: string} = {
+    [1000]       = "First $1K! 🔥",
+    [10000]      = "$10K Baller! 💪",
+    [100000]     = "$100K Shot Caller! ⭐",
+    [1000000]    = "$1M Millionaire! 🏆",
+    [10000000]   = "$10M Money Moves! 💸",
+    [100000000]  = "$100M GOAT Status! 👑",
+    [1000000000] = "$1B LEBRON MODE! 🐐",
+}
+local triggeredMilestones: {[number]: boolean} = {}
+
+local function showMilestoneBanner(amount: number)
+    local labelText = MILESTONE_LABELS[amount] or ("$" .. FormatNumber.format(amount) .. " reached!")
+
+    local banner = Instance.new("Frame")
+    banner.Name = "MilestoneBanner"
+    banner.Size = UDim2.new(0, 380, 0, 56)
+    banner.Position = UDim2.new(0.5, -190, 0, -70) -- starts hidden above the screen
+    banner.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+    banner.BorderSizePixel = 0
+    banner.ZIndex = 10
+    banner.Parent = screenGui
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 12)
+    bCorner.Parent = banner
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = Color3.fromRGB(255, 180, 0)
+    bStroke.Thickness = 2
+    bStroke.Parent = banner
+
+    local bLabel = Instance.new("TextLabel")
+    bLabel.Size = UDim2.new(1, -16, 1, 0)
+    bLabel.Position = UDim2.new(0, 8, 0, 0)
+    bLabel.BackgroundTransparency = 1
+    bLabel.Font = Enum.Font.FredokaOne
+    bLabel.Text = labelText
+    bLabel.TextColor3 = Color3.fromRGB(255, 220, 60)
+    bLabel.TextSize = 22
+    bLabel.TextXAlignment = Enum.TextXAlignment.Center
+    bLabel.ZIndex = 11
+    bLabel.Parent = banner
+
+    -- Slide down from above into view (just below the cash HUD)
+    local slideIn = TweenService:Create(banner,
+        TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0.5, -190, 0, 90)
+        })
+    slideIn:Play()
+
+    -- Auto-dismiss after 2.5 seconds
+    task.delay(2.5, function()
+        local slideOut = TweenService:Create(banner,
+            TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+                Position = UDim2.new(0.5, -190, 0, -70)
+            })
+        slideOut:Play()
+        slideOut.Completed:Connect(function()
+            banner:Destroy()
+        end)
+    end)
+end
+
+-- Check milestones whenever Cash changes
+localPlayer.AttributeChanged:Connect(function(attr)
+    if attr ~= "Cash" then return end
+    local cash = localPlayer:GetAttribute("Cash") or 0
+    for _, threshold in ipairs(MILESTONES) do
+        if cash >= threshold and not triggeredMilestones[threshold] then
+            triggeredMilestones[threshold] = true
+            showMilestoneBanner(threshold)
+        end
+    end
+end)
+
+-- Reset milestones on each rebirth so the climb back up feels rewarding every time
+local rebirthNotify = remotes:WaitForChild("RebirthNotify") :: RemoteEvent
+rebirthNotify.OnClientEvent:Connect(function()
+    triggeredMilestones = {}
+end)
+
+-- 4. Welcome Back Screen (shown when returning after offline earnings accrued)
+local offlineEvent = remotes:WaitForChild("OfflineEarnings") :: RemoteEvent
+
+-- Use shared FormatNumber module for all number/time formatting
+
+local welcomeGui = Instance.new("ScreenGui")
+welcomeGui.Name = "WelcomeBackGui"
+welcomeGui.ResetOnSpawn = false
+welcomeGui.DisplayOrder = 100 -- Render on top of everything
+welcomeGui.Enabled = false
+welcomeGui.Parent = playerGui
+
+-- Dark overlay
+local overlay = Instance.new("Frame")
+overlay.Size = UDim2.new(1, 0, 1, 0)
+overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+overlay.BackgroundTransparency = 0.45
+overlay.BorderSizePixel = 0
+overlay.Parent = welcomeGui
+
+-- Main card (centered)
+local card = Instance.new("Frame")
+card.Name = "WelcomeCard"
+card.Size = UDim2.new(0, 420, 0, 320)
+card.Position = UDim2.new(0.5, -210, 0.5, -160)
+card.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
+card.BorderSizePixel = 0
+card.Parent = welcomeGui
+
+local cardCorner = Instance.new("UICorner")
+cardCorner.CornerRadius = UDim.new(0, 20)
+cardCorner.Parent = card
+
+local cardStroke = Instance.new("UIStroke")
+cardStroke.Color = Color3.fromRGB(255, 110, 0)
+cardStroke.Thickness = 2.5
+cardStroke.Parent = card
+
+-- Basketball emoji label
+local ballLabel = Instance.new("TextLabel")
+ballLabel.Size = UDim2.new(1, 0, 0, 56)
+ballLabel.Position = UDim2.new(0, 0, 0, 18)
+ballLabel.BackgroundTransparency = 1
+ballLabel.Text = "🏀"
+ballLabel.TextSize = 48
+ballLabel.Font = Enum.Font.GothamBold
+ballLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+ballLabel.Parent = card
+
+-- Title
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, -40, 0, 36)
+titleLabel.Position = UDim2.new(0, 20, 0, 78)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Welcome Back!"
+titleLabel.TextSize = 28
+titleLabel.Font = Enum.Font.FredokaOne
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+titleLabel.Parent = card
+
+-- "You were away for..." label
+local awayLabel = Instance.new("TextLabel")
+awayLabel.Size = UDim2.new(1, -40, 0, 28)
+awayLabel.Position = UDim2.new(0, 20, 0, 120)
+awayLabel.BackgroundTransparency = 1
+awayLabel.Text = "You were away for ..."
+awayLabel.TextSize = 18
+awayLabel.Font = Enum.Font.Gotham
+awayLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+awayLabel.TextXAlignment = Enum.TextXAlignment.Center
+awayLabel.Parent = card
+
+-- Earned amount (big, orange, rolling)
+local earnedLabel = Instance.new("TextLabel")
+earnedLabel.Size = UDim2.new(1, -40, 0, 60)
+earnedLabel.Position = UDim2.new(0, 20, 0, 158)
+earnedLabel.BackgroundTransparency = 1
+earnedLabel.Text = "+$0"
+earnedLabel.TextSize = 44
+earnedLabel.Font = Enum.Font.FredokaOne
+earnedLabel.TextColor3 = Color3.fromRGB(255, 160, 30)
+earnedLabel.TextXAlignment = Enum.TextXAlignment.Center
+earnedLabel.Parent = card
+
+-- "LET'S BALL" dismiss button
+local ballBtn = Instance.new("TextButton")
+ballBtn.Size = UDim2.new(0, 220, 0, 54)
+ballBtn.Position = UDim2.new(0.5, -110, 1, -76)
+ballBtn.BackgroundColor3 = Color3.fromRGB(255, 110, 0)
+ballBtn.BorderSizePixel = 0
+ballBtn.Text = "LET'S BALL!"
+ballBtn.TextSize = 22
+ballBtn.Font = Enum.Font.FredokaOne
+ballBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ballBtn.AutoButtonColor = false
+ballBtn.Parent = card
+
+local btnCorner = Instance.new("UICorner")
+btnCorner.CornerRadius = UDim.new(0.4, 0)
+btnCorner.Parent = ballBtn
+
+-- Button hover/press tweens
+local btnHover = TweenService:Create(ballBtn, TweenInfo.new(0.12), {
+    BackgroundColor3 = Color3.fromRGB(255, 140, 30)
+})
+local btnLeave = TweenService:Create(ballBtn, TweenInfo.new(0.12), {
+    BackgroundColor3 = Color3.fromRGB(255, 110, 0)
+})
+ballBtn.MouseEnter:Connect(function() btnHover:Play() end)
+ballBtn.MouseLeave:Connect(function() btnLeave:Play() end)
+
+-- Dismiss handler
+ballBtn.MouseButton1Click:Connect(function()
+    local hideTween = TweenService:Create(card, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
+        Size = UDim2.new(0, 380, 0, 0),
+        Position = UDim2.new(0.5, -190, 0.5, 0)
+    })
+    hideTween:Play()
+    hideTween.Completed:Connect(function()
+        welcomeGui.Enabled = false
+    end)
+end)
+
+-- Listen for offline earnings from server
+offlineEvent.OnClientEvent:Connect(function(offlineCash: number, timeAway: number)
+    awayLabel.Text = string.format("You were away for %s", FormatNumber.formatTime(timeAway))
+
+    -- Start card off-screen below, slide up into position
+    card.Position = UDim2.new(0.5, -210, 1.2, 0)
+    card.Size = UDim2.new(0, 420, 0, 320)
+    earnedLabel.Text = "+$0"
+    welcomeGui.Enabled = true
+
+    local slideIn = TweenService:Create(card, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+        Position = UDim2.new(0.5, -210, 0.5, -160)
+    })
+    slideIn:Play()
+
+    -- Rolling number animation over 1.5 seconds
+    local duration = 1.5
+    local startTime = tick()
+    local RunService = game:GetService("RunService")
+    local conn: RBXScriptConnection
+    conn = RunService.Heartbeat:Connect(function()
+        local elapsed = tick() - startTime
+        local t = math.min(elapsed / duration, 1)
+        -- Ease-out cubic
+        t = 1 - (1 - t) ^ 3
+        local displayed = math.floor(offlineCash * t)
+        earnedLabel.Text = "+$" .. FormatNumber.format(displayed)
+        if elapsed >= duration then
+            earnedLabel.Text = "+$" .. FormatNumber.format(offlineCash)
+            conn:Disconnect()
+        end
+    end)
 end)
 
 print("[Client] HUD loaded successfully!")

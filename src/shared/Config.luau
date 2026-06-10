@@ -6,6 +6,8 @@ Config.StartingStats = {
     Cash = 0,
     Rebirths = 0,
     HoopUpgradeLevel = 1,
+    LogoutTime = 0, -- os.time() stamped on logout; used for offline earnings calculation
+    PlayerUpgradeLevel = 1, -- which PlayerUpgrades tier the player has purchased
     OwnedShooters = {
         Rookie = 0,
         College = 0,
@@ -129,6 +131,9 @@ Config.Rebirth = {
 Config.PlayerShot = {
     Cooldown = 0.5, -- limit clicks to 2 per second max to avoid spam
     BaseYield = 5,
+    -- Each manual shot also awards this many seconds' worth of passive NPC income on top of BaseYield.
+    -- Tune this single value in Config to change how rewarding active play feels.
+    PassiveScaleFactor = 0.5,
 }
 
 -- Helper function to determine which distance zone a shooter is in
@@ -151,6 +156,23 @@ end
 
 function Config.GetRebirthCost(currentRebirths: number): number
     return math.floor(Config.Rebirth.BaseCost * (Config.Rebirth.CostScaleFactor ^ currentRebirths))
+end
+
+-- Player-specific shot multiplier upgrades (separate from hoop / rebirth)
+-- Linear 5-level placeholder; to be reworked into a grid-based system in Phase 2.
+Config.PlayerUpgrades = {
+    [1] = { Name = "Raw Talent",        Multiplier = 1,  Cost = 0     },
+    [2] = { Name = "Practice Regimen",  Multiplier = 2,  Cost = 500   },
+    [3] = { Name = "Shooting Coach",    Multiplier = 4,  Cost = 3000  },
+    [4] = { Name = "All-Star Training", Multiplier = 8,  Cost = 15000 },
+    [5] = { Name = "LeBron Mode",       Multiplier = 20, Cost = 75000 },
+}
+
+-- Returns the cost to purchase the next player upgrade level.
+-- Returns math.huge if already maxed (no next level exists).
+function Config.GetPlayerUpgradeCost(currentLevel: number): number
+    local next = Config.PlayerUpgrades[currentLevel + 1]
+    return next and next.Cost or math.huge
 end
 
 return Config

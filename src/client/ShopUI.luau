@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local FormatNumber = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("FormatNumber"))
 
 local ShopUI = {}
 local localPlayer = Players.LocalPlayer
@@ -18,28 +19,20 @@ local toggleButton: TextButton
 local shooterCards: { [string]: { CostLabel: TextLabel, OwnedLabel: TextLabel, BuyBtn: TextButton } } = {}
 local hoopCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
 local rebirthCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
+local playerUpgradeCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
 
 -- Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
 local buyUpgrade = remotes:WaitForChild("BuyUpgrade") :: RemoteFunction
 local rebirthRequest = remotes:WaitForChild("RebirthRequest") :: RemoteFunction
 
--- Number Formatter (e.g. 1,000,000)
-local function formatNumber(amount: number): string
-    local formatted = tostring(amount)
-    local k
-    while true do
-        formatted, k = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
-        if k == 0 then break end
-    end
-    return formatted
-end
 
 -- Refreshes all prices and availability in the Shop
 local function refreshShop()
     local cash = localPlayer:GetAttribute("Cash") or 0
     local rebirths = localPlayer:GetAttribute("Rebirths") or 0
     local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
+    local playerUpgradeLevel = localPlayer:GetAttribute("PlayerUpgradeLevel") or 1
     
     -- 1. Update Shooter Cards
     for tier, card in pairs(shooterCards) do
@@ -47,7 +40,7 @@ local function refreshShop()
         local cost = Config.GetShooterCost(tier, owned)
         
         card.OwnedLabel.Text = "Owned: " .. owned
-        card.CostLabel.Text = "$" .. formatNumber(cost)
+        card.CostLabel.Text = "$" .. FormatNumber.format(cost)
         
         if cash >= cost then
             card.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Green
@@ -65,7 +58,7 @@ local function refreshShop()
     local nextHoopConfig = Config.Hoops[nextLevel]
     if nextHoopConfig then
         hoopCard.TitleLabel.Text = "Upgrade Hoop (" .. nextHoopConfig.Name .. ")"
-        hoopCard.CostLabel.Text = "$" .. formatNumber(nextHoopConfig.Cost)
+        hoopCard.CostLabel.Text = "$" .. FormatNumber.format(nextHoopConfig.Cost)
         
         if cash >= nextHoopConfig.Cost then
             hoopCard.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
@@ -85,10 +78,35 @@ local function refreshShop()
         hoopCard.BuyBtn.Active = false
     end
     
-    -- 3. Update Rebirth Card
+    -- 3. Update Player Upgrade Card
+    local nextUpgradeCfg = Config.PlayerUpgrades[playerUpgradeLevel + 1]
+    if nextUpgradeCfg then
+        local currentUpgradeName = Config.PlayerUpgrades[playerUpgradeLevel].Name
+        playerUpgradeCard.TitleLabel.Text = "Player Upgrade (" .. currentUpgradeName .. " → " .. nextUpgradeCfg.Name .. ")"
+        playerUpgradeCard.CostLabel.Text = "$" .. FormatNumber.format(nextUpgradeCfg.Cost)
+
+        if cash >= nextUpgradeCfg.Cost then
+            playerUpgradeCard.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+            playerUpgradeCard.BuyBtn.Text = "UPGRADE"
+            playerUpgradeCard.BuyBtn.Active = true
+        else
+            playerUpgradeCard.BuyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+            playerUpgradeCard.BuyBtn.Text = "LOCK"
+            playerUpgradeCard.BuyBtn.Active = false
+        end
+    else
+        local maxName = Config.PlayerUpgrades[playerUpgradeLevel] and Config.PlayerUpgrades[playerUpgradeLevel].Name or "Max"
+        playerUpgradeCard.TitleLabel.Text = "Player Upgrade (" .. maxName .. " - MAX)"
+        playerUpgradeCard.CostLabel.Text = "MAX"
+        playerUpgradeCard.BuyBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+        playerUpgradeCard.BuyBtn.Text = "MAX"
+        playerUpgradeCard.BuyBtn.Active = false
+    end
+
+    -- 4. Update Rebirth Card
     local rebirthCost = Config.GetRebirthCost(rebirths)
     rebirthCard.TitleLabel.Text = "Rebirth (" .. rebirths .. ")"
-    rebirthCard.CostLabel.Text = "$" .. formatNumber(rebirthCost)
+    rebirthCard.CostLabel.Text = "$" .. FormatNumber.format(rebirthCost)
     
     if cash >= rebirthCost then
         rebirthCard.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
@@ -290,6 +308,11 @@ local function buildShopUI(playerGui: PlayerGui)
                 if success then
                     refreshShop()
                 end
+            elseif title == "Player Upgrade" then
+                local success, msg = buyUpgrade:InvokeServer("PlayerUpgrade", "")
+                if success then
+                    refreshShop()
+                end
             elseif title == "Rebirth" then
                 local success, msg = rebirthRequest:InvokeServer()
                 if success then
@@ -307,6 +330,12 @@ local function buildShopUI(playerGui: PlayerGui)
             }
         elseif title == "Upgrade Hoop" then
             hoopCard = {
+                CostLabel = costLbl,
+                TitleLabel = titleLbl,
+                BuyBtn = buyBtn
+            }
+        elseif title == "Player Upgrade" then
+            playerUpgradeCard = {
                 CostLabel = costLbl,
                 TitleLabel = titleLbl,
                 BuyBtn = buyBtn
@@ -335,7 +364,10 @@ local function buildShopUI(playerGui: PlayerGui)
     
     -- Build Hoop Upgrade Card
     createItemCard("Upgrade Hoop", "Upgrade your hoop rim to multiply all points earned", false, nil)
-    
+
+    -- Build Player Upgrade Card
+    createItemCard("Player Upgrade", "Boost your manual shot — scales with your passive roster!", false, nil)
+
     -- Build Rebirth Card
     createItemCard("Rebirth", "Reset cash/shooters for permanent +50% earnings!", false, nil)
     
@@ -361,7 +393,8 @@ function ShopUI.Initialize()
     
     -- Listen to local player attribute changes to refresh UI prices in real time
     localPlayer.AttributeChanged:Connect(function(attributeName)
-        if attributeName == "Cash" or attributeName == "Rebirths" or attributeName == "HoopUpgradeLevel" or string.match(attributeName, "^Shooter_") then
+        if attributeName == "Cash" or attributeName == "Rebirths" or attributeName == "HoopUpgradeLevel"
+            or attributeName == "PlayerUpgradeLevel" or string.match(attributeName, "^Shooter_") then
             if shopFrame.Visible then
                 refreshShop()
             end

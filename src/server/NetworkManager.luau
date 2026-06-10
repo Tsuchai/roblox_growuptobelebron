@@ -44,6 +44,8 @@ local function setupRemotes()
     getOrCreateRemoteEvent("ShootRequest")
     getOrCreateRemoteEvent("MoveShooter")
     getOrCreateRemoteEvent("RenderShot")
+    getOrCreateRemoteEvent("OfflineEarnings")
+    getOrCreateRemoteEvent("RebirthNotify")
     getOrCreateRemoteFunction("BuyUpgrade")
     getOrCreateRemoteFunction("RebirthRequest")
 end
@@ -94,7 +96,15 @@ local function handleShootRequest(player: Player)
         local rebirthMultiplier = 1 + (rebirths * Config.Rebirth.MultiplierPerRebirth)
         
         -- Calculate cash earned
-        local cashEarned = math.floor(Config.PlayerShot.BaseYield * multiplier * hoopMultiplier * rebirthMultiplier)
+        -- Formula: (BaseYield + passiveRate * PassiveScaleFactor) * zoneMult * hoopMult * rebirthMult * upgradeMult
+        local passiveRate = DataManager.GetPassiveRate(player)
+        local passiveBonus = passiveRate * Config.PlayerShot.PassiveScaleFactor
+        local upgradeLevel = playerData.PlayerUpgradeLevel or 1
+        local upgradeCfg = Config.PlayerUpgrades[upgradeLevel]
+        local upgradeMult = upgradeCfg and upgradeCfg.Multiplier or 1
+        local cashEarned = math.floor(
+            (Config.PlayerShot.BaseYield + passiveBonus) * multiplier * hoopMultiplier * rebirthMultiplier * upgradeMult
+        )
         
         local currentCash = playerData.Cash or 0
         DataManager.Set(player, "Cash", currentCash + cashEarned)

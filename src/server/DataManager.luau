@@ -1,135 +1,199 @@
 --!strict
 local Players = game:GetService("Players")
-local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local ProfileStore = require(script.Parent:WaitForChild("ProfileStore"))
 
-local SaveDataStore = DataStoreService:GetDataStore("GrowUpLeBron_v1")
 local DataManager = {}
-local sessionData: { [Player]: any } = {}
 
--- Helper function to clone the default stats table so players don't share references
-local function cloneTable(t: any): any
-    if type(t) ~= "table" then return t end
-    local clone = {}
-    for k, v in pairs(t) do
-        if type(v) == "table" then
-            clone[k] = cloneTable(v)
-        else
-            clone[k] = v
-        end
-    end
-    return clone
-end
+-- ─── ProfileStore Setup ───────────────────────────────────────────────────────
+-- Template mirrors Config.StartingStats so Reconcile() fills in any new fields
+-- added in future updates without losing existing player data.
+local PlayerStore = ProfileStore.New("GrowUpLeBron_v1", {
+    Cash             = Config.StartingStats.Cash,
+    Rebirths         = Config.StartingStats.Rebirths,
+    HoopUpgradeLevel = Config.StartingStats.HoopUpgradeLevel,
+    LogoutTime       = Config.StartingStats.LogoutTime,
+    PlayerUpgradeLevel = 1,
+    OwnedShooters    = {
+        Rookie  = 0,
+        College = 0,
+        Pro     = 0,
+        AllStar = 0,
+        LeBron  = 0,
+    },
+    ShooterPositions = {}, -- { Id, Tier, Pos = {x, y, z} }
+})
 
--- Load player data
-local function loadData(player: Player)
-    local userId = player.UserId
-    local dataKey = "Player_" .. userId
-    
-    local success, data = pcall(function()
-        return SaveDataStore:GetAsync(dataKey)
-    end)
-    
-    local loadedData
-    if success and data then
-        loadedData = data
-        -- Re-verify that any new config fields are populated (backwards compatibility)
-        local defaultStats = Config.StartingStats
-        for key, defaultValue in pairs(defaultStats) do
-            if loadedData[key] == nil then
-                loadedData[key] = cloneTable(defaultValue)
-            elseif type(defaultValue) == "table" then
-                for subKey, subValue in pairs(defaultValue) do
-                    if loadedData[key][subKey] == nil then
-                        loadedData[key][subKey] = subValue
-                    end
-                end
+-- Active profile objects keyed by Player
+local profiles: { [Player]: any } = {}
+
+-- ─── Passive Rate Helper ──────────────────────────────────────────────────────
+-- Calculates cash/sec a player passively earns from their shooters,
+-- accounting for hoop multiplier and rebirth multiplier.
+-- Used both for offline earnings and by NetworkManager for the manual shot bonus.
+local function calculatePassiveRate(data: any): number
+    local rate = 0
+    if not data.OwnedShooters then return 0 end
+
+    for tier, count in pairs(data.OwnedShooters) do
+        if count > 0 then
+            local cfg = Config.Shooters[tier]
+            if cfg then
+                rate += (cfg.BaseYield / cfg.Cooldown) * count
             end
         end
-    else
-        loadedData = cloneTable(Config.StartingStats)
-        if not success then
-            warn("Failed to load data for player " .. player.Name .. ". Loading default stats.")
-        end
     end
-    
-    sessionData[player] = loadedData
-    
-    -- Sync loaded data to Player attributes for easy client replication
-    player:SetAttribute("Cash", loadedData.Cash)
-    player:SetAttribute("Rebirths", loadedData.Rebirths)
-    player:SetAttribute("HoopUpgradeLevel", loadedData.HoopUpgradeLevel)
-    if loadedData.OwnedShooters then
-        for tier, count in pairs(loadedData.OwnedShooters) do
+
+    local hoopLevel = data.HoopUpgradeLevel or 1
+    local hoopCfg = Config.Hoops[hoopLevel]
+    if hoopCfg then
+        rate *= hoopCfg.Multiplier
+    end
+
+    local rebirths = data.Rebirths or 0
+    rate *= (1 + Config.Rebirth.MultiplierPerRebirth * rebirths)
+
+    return rate
+end
+
+-- ─── Attribute Sync ───────────────────────────────────────────────────────────
+-- Syncs all persistent primitive values to Player attributes so the client
+-- can read them without RemoteFunctions.
+local function syncAllAttributes(player: Player, data: any)
+    player:SetAttribute("Cash",               data.Cash or 0)
+    player:SetAttribute("Rebirths",           data.Rebirths or 0)
+    player:SetAttribute("HoopUpgradeLevel",   data.HoopUpgradeLevel or 1)
+    player:SetAttribute("PlayerUpgradeLevel", data.PlayerUpgradeLevel or 1)
+    if data.OwnedShooters then
+        for tier, count in pairs(data.OwnedShooters) do
             player:SetAttribute("Shooter_" .. tier, count)
         end
     end
-    
-    -- Setup Roblox Leaderstats (top right leaderboard)
+end
+
+-- ─── Leaderstats Setup ───────────────────────────────────────────────────────
+local function setupLeaderstats(player: Player, data: any)
     local leaderstats = Instance.new("Folder")
     leaderstats.Name = "leaderstats"
     leaderstats.Parent = player
-    
+
     local cashVal = Instance.new("IntValue")
     cashVal.Name = "Cash"
-    cashVal.Value = loadedData.Cash
+    cashVal.Value = data.Cash or 0
     cashVal.Parent = leaderstats
-    
+
     local rebirthsVal = Instance.new("IntValue")
     rebirthsVal.Name = "Rebirths"
-    rebirthsVal.Value = loadedData.Rebirths
+    rebirthsVal.Value = data.Rebirths or 0
     rebirthsVal.Parent = leaderstats
 end
 
--- Save player data
-local function saveData(player: Player)
-    local data = sessionData[player]
-    if not data then return end
-    
-    local userId = player.UserId
-    local dataKey = "Player_" .. userId
-    
-    local success, err = pcall(function()
-        SaveDataStore:SetAsync(dataKey, data)
+-- ─── Player Join ─────────────────────────────────────────────────────────────
+local function onPlayerAdded(player: Player)
+    local profile = PlayerStore:StartSessionAsync(
+        "Player_" .. player.UserId,
+        {
+            -- Cancel the load if the player has already left (race condition protection)
+            Cancel = function()
+                return player.Parent == nil
+            end,
+        }
+    )
+
+    if profile == nil then
+        -- Session couldn't start (player left during load, or DataStore issue)
+        player:Kick("Data failed to load. Please rejoin.")
+        return
+    end
+
+    -- If the player left while the profile was loading, end the session immediately
+    if player.Parent == nil then
+        profile:EndSession()
+        return
+    end
+
+    -- Fill in any missing keys introduced in newer versions of the game
+    profile:Reconcile()
+
+    -- Associate the UserId for GDPR compliance
+    profile:AddUserId(player.UserId)
+
+    -- If session is ended externally (server shutdown, session steal), kick the player
+    -- so their data isn't silently lost.
+    profile.OnSessionEnd:Connect(function()
+        profiles[player] = nil
+        player:Kick("Your session was ended. Please rejoin.")
     end)
-    
-    if not success then
-        warn("Failed to save data for player " .. player.Name .. ": " .. tostring(err))
-    else
-        print("Successfully saved data for " .. player.Name)
+
+    profiles[player] = profile
+    local data = profile.Data
+
+    -- ── Offline Earnings ──────────────────────────────────────────────────────
+    local offlineCash = 0
+    local timeAway = 0
+    if data.LogoutTime and data.LogoutTime > 0 then
+        timeAway = math.max(0, os.time() - data.LogoutTime)
+        if timeAway > 60 then
+            local passiveRate = calculatePassiveRate(data)
+            offlineCash = math.floor(passiveRate * timeAway)
+            data.Cash += offlineCash
+        end
+    end
+    data.LogoutTime = 0 -- Reset until next logout
+
+    -- ── Sync to client ────────────────────────────────────────────────────────
+    syncAllAttributes(player, data)
+    setupLeaderstats(player, data)
+
+    -- Fire offline earnings notification once the client UI is ready
+    if offlineCash > 0 then
+        task.spawn(function()
+            local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
+            local offlineEvent = remotes:WaitForChild("OfflineEarnings") :: RemoteEvent
+            player.CharacterAdded:Wait()
+            task.wait(2)
+            offlineEvent:FireClient(player, offlineCash, timeAway)
+        end)
     end
 end
 
--- Initial player join listener
+-- ─── Player Leave ─────────────────────────────────────────────────────────────
+local function onPlayerRemoving(player: Player)
+    local profile = profiles[player]
+    if profile then
+        -- Stamp logout time so offline earnings calculate correctly next session
+        profile.Data.LogoutTime = os.time()
+        profile:EndSession() -- ProfileStore handles the final save automatically
+        profiles[player] = nil
+    end
+end
+
+-- ─── Public API ───────────────────────────────────────────────────────────────
+
 function DataManager.Initialize()
-    Players.PlayerAdded:Connect(loadData)
-    Players.PlayerRemoving:Connect(function(player)
-        saveData(player)
-        sessionData[player] = nil
-    end)
-    
-    -- Bind to close to save data when server shuts down
-    game:BindToClose(function()
-        for _, player in ipairs(Players:GetPlayers()) do
-            saveData(player)
-        end
-    end)
+    Players.PlayerAdded:Connect(onPlayerAdded)
+    Players.PlayerRemoving:Connect(onPlayerRemoving)
+    -- Note: BindToClose is handled internally by ProfileStore (it saves all
+    -- active profiles on shutdown automatically).
+    print("[Server] DataManager Initialized (ProfileStore)")
 end
 
--- Data Accessors
+-- Returns the raw data table for a player's active session, or nil if not loaded.
 function DataManager.Get(player: Player): any?
-    return sessionData[player]
+    local profile = profiles[player]
+    return profile and profile.Data or nil
 end
 
--- Sets a top-level stat value
+-- Sets a top-level key in the player's data and syncs it to attributes/leaderstats.
 function DataManager.Set(player: Player, key: string, value: any)
-    local data = sessionData[player]
-    if not data then return end
-    
+    local profile = profiles[player]
+    if not profile then return end
+
+    local data = profile.Data
     data[key] = value
-    
+
     -- Sync primitive values to Player attributes
     if type(value) ~= "table" then
         player:SetAttribute(key, value)
@@ -138,8 +202,8 @@ function DataManager.Set(player: Player, key: string, value: any)
             player:SetAttribute("Shooter_" .. tier, count)
         end
     end
-    
-    -- Keep leaderstats in sync if they match
+
+    -- Keep leaderstats in sync
     local leaderstats = player:FindFirstChild("leaderstats")
     if leaderstats then
         local valObj = leaderstats:FindFirstChild(key)
@@ -149,11 +213,11 @@ function DataManager.Set(player: Player, key: string, value: any)
     end
 end
 
--- Updates a shooter owned count
+-- Increments a shooter tier count by `count`.
 function DataManager.AddShooter(player: Player, tier: string, count: number)
-    local data = sessionData[player]
-    if not data then return end
-    
+    local profile = profiles[player]
+    if not profile then return end
+    local data = profile.Data
     if data.OwnedShooters and data.OwnedShooters[tier] ~= nil then
         local newCount = data.OwnedShooters[tier] + count
         data.OwnedShooters[tier] = newCount
@@ -161,29 +225,39 @@ function DataManager.AddShooter(player: Player, tier: string, count: number)
     end
 end
 
--- Appends a shooter position coordinate to the player profile
+-- Appends a new shooter position entry to the player's ShooterPositions list.
 function DataManager.AddShooterPosition(player: Player, id: string, tier: string, relativePos: Vector3)
-    local data = sessionData[player]
-    if not data or not data.ShooterPositions then return end
-    
+    local profile = profiles[player]
+    if not profile then return end
+    local data = profile.Data
+    if not data.ShooterPositions then return end
     table.insert(data.ShooterPositions, {
-        Id = id,
+        Id   = id,
         Tier = tier,
-        Pos = {relativePos.X, relativePos.Y, relativePos.Z}
+        Pos  = { relativePos.X, relativePos.Y, relativePos.Z },
     })
 end
 
--- Updates an existing shooter's persistent coordinates
+-- Updates the stored position of an existing shooter by its Id.
 function DataManager.UpdateShooterPosition(player: Player, id: string, relativePos: Vector3)
-    local data = sessionData[player]
-    if not data or not data.ShooterPositions then return end
-    
+    local profile = profiles[player]
+    if not profile then return end
+    local data = profile.Data
+    if not data.ShooterPositions then return end
     for _, item in ipairs(data.ShooterPositions) do
         if item.Id == id then
-            item.Pos = {relativePos.X, relativePos.Y, relativePos.Z}
+            item.Pos = { relativePos.X, relativePos.Y, relativePos.Z }
             break
         end
     end
+end
+
+-- Returns the cash/sec a player passively earns (public wrapper for calculatePassiveRate).
+-- Used by NetworkManager to factor passive income into the manual shot reward.
+function DataManager.GetPassiveRate(player: Player): number
+    local profile = profiles[player]
+    if not profile then return 0 end
+    return calculatePassiveRate(profile.Data)
 end
 
 return DataManager
