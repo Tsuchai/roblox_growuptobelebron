@@ -16,13 +16,7 @@ local PlayerStore = ProfileStore.New("GrowUpLeBron_v1", {
     HoopUpgradeLevel = Config.StartingStats.HoopUpgradeLevel,
     LogoutTime       = Config.StartingStats.LogoutTime,
     PlayerUpgradeLevel = 1,
-    OwnedShooters    = {
-        Rookie  = 0,
-        College = 0,
-        Pro     = 0,
-        AllStar = 0,
-        LeBron  = 0,
-    },
+    ShooterInventory = {}, -- { Id, Tier, Attribute, BaseYield, Cooldown }
     ShooterPositions = {}, -- { Id, Tier, Pos = {x, y, z} }
 })
 
@@ -73,10 +67,15 @@ local function syncAllAttributes(player: Player, data: any)
     player:SetAttribute("Rebirths",           data.Rebirths or 0)
     player:SetAttribute("HoopUpgradeLevel",   data.HoopUpgradeLevel or 1)
     player:SetAttribute("PlayerUpgradeLevel", data.PlayerUpgradeLevel or 1)
-    if data.OwnedShooters then
-        for tier, count in pairs(data.OwnedShooters) do
-            player:SetAttribute("Shooter_" .. tier, count)
+    
+    local counts = { Rookie=0, College=0, Pro=0, AllStar=0, LeBron=0 }
+    if data.ShooterInventory then
+        for _, shooter in ipairs(data.ShooterInventory) do
+            counts[shooter.Tier] = (counts[shooter.Tier] or 0) + 1
         end
+    end
+    for tier, count in pairs(counts) do
+        player:SetAttribute("Shooter_" .. tier, count)
     end
 end
 
@@ -136,6 +135,47 @@ local function onPlayerAdded(player: Player)
 
     profiles[player] = profile
     local data = profile.Data
+
+    -- ── Data Migration (Generic OwnedShooters -> Unique ShooterInventory) ──
+    if data.OwnedShooters then
+        data.ShooterInventory = data.ShooterInventory or {}
+        
+        -- First, migrate the ones already placed on the court (to preserve their IDs)
+        if data.ShooterPositions then
+            for _, item in ipairs(data.ShooterPositions) do
+                local tier = item.Tier
+                if data.OwnedShooters[tier] and data.OwnedShooters[tier] > 0 then
+                    data.OwnedShooters[tier] = data.OwnedShooters[tier] - 1
+                    local stats = Config.RollShooterStats(tier)
+                    table.insert(data.ShooterInventory, {
+                        Id = item.Id,
+                        Tier = tier,
+                        Attribute = stats.Attribute,
+                        BaseYield = stats.BaseYield,
+                        Cooldown = stats.Cooldown
+                    })
+                end
+            end
+        end
+        
+        -- Next, migrate any remaining owned shooters not on the court
+        for tier, count in pairs(data.OwnedShooters) do
+            for i = 1, count do
+                local stats = Config.RollShooterStats(tier)
+                local id = game:GetService("HttpService"):GenerateGUID(false)
+                table.insert(data.ShooterInventory, {
+                    Id = id,
+                    Tier = tier,
+                    Attribute = stats.Attribute,
+                    BaseYield = stats.BaseYield,
+                    Cooldown = stats.Cooldown
+                })
+            end
+        end
+        
+        -- Remove old data structure so migration doesn't run again
+        data.OwnedShooters = nil
+    end
 
     -- ── Offline Earnings ──────────────────────────────────────────────────────
     local offlineCash = 0
@@ -231,16 +271,34 @@ function DataManager.Set(player: Player, key: string, value: any)
     end
 end
 
--- Increments a shooter tier count by `count`.
-function DataManager.AddShooter(player: Player, tier: string, count: number)
+-- Adds a newly rolled shooter to the player's inventory
+function DataManager.AddShooterToInventory(player: Player, shooterData: any)
     local profile = profiles[player]
     if not profile then return end
+    
     local data = profile.Data
-    if data.OwnedShooters and data.OwnedShooters[tier] ~= nil then
-        local newCount = data.OwnedShooters[tier] + count
-        data.OwnedShooters[tier] = newCount
-        player:SetAttribute("Shooter_" .. tier, newCount)
+    data.ShooterInventory = data.ShooterInventory or {}
+    table.insert(data.ShooterInventory, shooterData)
+    
+    -- Update client count attribute
+    local tier = shooterData.Tier
+    local currentCount = player:GetAttribute("Shooter_" .. tier) or 0
+    player:SetAttribute("Shooter_" .. tier, currentCount + 1)
+end
+
+-- Gets a specific shooter from the inventory by ID
+function DataManager.GetShooterFromInventory(player: Player, id: string): any?
+    local profile = profiles[player]
+    if not profile then return nil end
+    local data = profile.Data
+    if not data.ShooterInventory then return nil end
+    
+    for _, item in ipairs(data.ShooterInventory) do
+        if item.Id == id then
+            return item
+        end
     end
+    return nil
 end
 
 -- Appends a new shooter position entry to the player's ShooterPositions list.

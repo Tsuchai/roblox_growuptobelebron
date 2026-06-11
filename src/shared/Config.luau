@@ -68,7 +68,11 @@ Config.Shooters = {
         BaseYield = 10,
         BaseCost = 50,
         CostScaleFactor = 1.3,
-        Attribute = "Slasher" -- Good in paint
+        AttributeChances = {
+            Slasher = 0.80,
+            MidRangeDeadeye = 0.15,
+            LimitlessRange = 0.05
+        }
     },
     College = {
         DisplayName = "College Player",
@@ -76,7 +80,11 @@ Config.Shooters = {
         BaseYield = 40,
         BaseCost = 250,
         CostScaleFactor = 1.35,
-        Attribute = "MidRangeDeadeye" -- Good at mid-range
+        AttributeChances = {
+            Slasher = 0.30,
+            MidRangeDeadeye = 0.60,
+            LimitlessRange = 0.10
+        }
     },
     Pro = {
         DisplayName = "Pro Player",
@@ -84,7 +92,11 @@ Config.Shooters = {
         BaseYield = 150,
         BaseCost = 1200,
         CostScaleFactor = 1.4,
-        Attribute = "LimitlessRange" -- Good at 3pt line
+        AttributeChances = {
+            Slasher = 0.15,
+            MidRangeDeadeye = 0.35,
+            LimitlessRange = 0.50
+        }
     },
     AllStar = {
         DisplayName = "All-Star Player",
@@ -92,7 +104,11 @@ Config.Shooters = {
         BaseYield = 600,
         BaseCost = 6000,
         CostScaleFactor = 1.45,
-        Attribute = "LimitlessRange"
+        AttributeChances = {
+            Slasher = 0.10,
+            MidRangeDeadeye = 0.20,
+            LimitlessRange = 0.70
+        }
     },
     LeBron = {
         DisplayName = "LeBron James",
@@ -100,7 +116,11 @@ Config.Shooters = {
         BaseYield = 2500,
         BaseCost = 30000,
         CostScaleFactor = 1.5,
-        Attribute = "LimitlessRange" -- Excellent everywhere
+        AttributeChances = {
+            Slasher = 0.0,
+            MidRangeDeadeye = 0.0,
+            LimitlessRange = 1.0
+        }
     }
 }
 
@@ -163,6 +183,38 @@ function Config.GetShotStats(distance: number, attributeName: string?): { Accura
         Accuracy = math.clamp(finalAccuracy, 0, 1),
         Multiplier = finalMultiplier,
         Name = zoneName
+    }
+end
+
+-- Rolls stats for a newly purchased shooter, applying +/- 10% randomness
+function Config.RollShooterStats(tier: string): { Attribute: string, BaseYield: number, Cooldown: number }
+    local shooter = Config.Shooters[tier]
+    if not shooter then return { Attribute = "Slasher", BaseYield = 0, Cooldown = 1 } end
+    
+    -- Select Attribute based on chances
+    local roll = math.random()
+    local cumulative = 0
+    local selectedAttribute = "Slasher"
+    
+    for attr, chance in pairs(shooter.AttributeChances) do
+        cumulative += chance
+        if roll <= cumulative then
+            selectedAttribute = attr
+            break
+        end
+    end
+    
+    -- Randomize stats +/- 10%
+    local yieldVariance = 0.9 + (math.random() * 0.2)
+    local cooldownVariance = 0.9 + (math.random() * 0.2)
+    
+    local finalYield = math.max(1, math.floor(shooter.BaseYield * yieldVariance))
+    local finalCooldown = math.max(0.1, shooter.Cooldown * cooldownVariance)
+    
+    return {
+        Attribute = selectedAttribute,
+        BaseYield = finalYield,
+        Cooldown = finalCooldown
     }
 end
 

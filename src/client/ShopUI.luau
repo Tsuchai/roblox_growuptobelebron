@@ -17,9 +17,9 @@ local toggleButton: TextButton
 
 -- Cache for dynamically updating cards
 local shooterCards: { [string]: { CostLabel: TextLabel, OwnedLabel: TextLabel, BuyBtn: TextButton } } = {}
-local hoopCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
-local rebirthCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
-local playerUpgradeCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {}
+local hoopCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
+local rebirthCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
+local playerUpgradeCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
 
 -- Remotes
 local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
@@ -357,7 +357,7 @@ local function buildShopUI(playerGui: PlayerGui)
     for _, tier in ipairs(orderedTiers) do
         local shooter = Config.Shooters[tier]
         if shooter then
-            local desc = "+" .. shooter.BaseYield .. " Cash, " .. shooter.Cooldown .. "s Cooldown (" .. shooter.Attribute .. ")"
+            local desc = "~" .. shooter.BaseYield .. " Cash, ~" .. shooter.Cooldown .. "s Cooldown (Random Attribute)"
             createItemCard(shooter.DisplayName, desc, true, tier)
         end
     end

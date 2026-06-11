@@ -16,13 +16,24 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
     local currentCash = data.Cash or 0
     
     if upgradeType == "Shooter" then
-        local currentOwned = data.OwnedShooters and data.OwnedShooters[upgradeName]
-        if not currentOwned then return false, "Invalid shooter tier" end
+        -- Count existing from attributes so scaling cost works
+        local currentOwned = player:GetAttribute("Shooter_" .. upgradeName) or 0
+        if currentOwned == nil then return false, "Invalid shooter tier" end
         
         local cost = Config.GetShooterCost(upgradeName, currentOwned)
         if currentCash >= cost then
+            local stats = Config.RollShooterStats(upgradeName)
             local id = game:GetService("HttpService"):GenerateGUID(false)
-            local existingCount = #data.ShooterPositions
+            
+            local shooterData = {
+                Id = id,
+                Tier = upgradeName,
+                Attribute = stats.Attribute,
+                BaseYield = stats.BaseYield,
+                Cooldown = stats.Cooldown
+            }
+            
+            local existingCount = data.ShooterPositions and #data.ShooterPositions or 0
             
             local offsetMultiplierX = (existingCount % 3) - 1
             local offsetMultiplierZ = math.floor(existingCount / 3)
@@ -33,7 +44,7 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
             )
             
             DataManager.Set(player, "Cash", currentCash - cost)
-            DataManager.AddShooter(player, upgradeName, 1)
+            DataManager.AddShooterToInventory(player, shooterData)
 
             if existingCount < (Config.MaxActiveShooters or 5) then
                 DataManager.AddShooterPosition(player, id, upgradeName, relativePos)
@@ -103,9 +114,14 @@ local function handleRebirthRequest(player: Player): (boolean, string)
         DataManager.Set(player, "HoopUpgradeLevel", 1)
         
         -- Reset shooters
-        local resetShooters = cloneTable(Config.StartingStats.OwnedShooters)
-        DataManager.Set(player, "OwnedShooters", resetShooters)
+        DataManager.Set(player, "ShooterInventory", {})
         DataManager.Set(player, "ShooterPositions", {})
+        
+        -- Reset attributes for UI sync
+        local orderedTiers = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
+        for _, tier in ipairs(orderedTiers) do
+            player:SetAttribute("Shooter_" .. tier, 0)
+        end
         
         -- Respawn shooters (which clears and resets to empty/rookie)
         ShooterManager.SpawnShootersForPlayer(player)
@@ -123,19 +139,6 @@ local function handleRebirthRequest(player: Player): (boolean, string)
     end
 end
 
--- Helper to clone tables safely
-function cloneTable(t: any): any
-    if type(t) ~= "table" then return t end
-    local clone = {}
-    for k, v in pairs(t) do
-        if type(v) == "table" then
-            clone[k] = cloneTable(v)
-        else
-            clone[k] = v
-        end
-    end
-    return clone
-end
 
 function ShopManager.Initialize()
     task.spawn(function()

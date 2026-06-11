@@ -22,7 +22,9 @@ local JERSEY_COLORS = {
 local function createShooterModel(tier: string, owner: Player, id: string): Model
     local shooter = Config.Shooters[tier]
     local displayName = shooter and shooter.DisplayName or "Shooter"
-    local attributeName = shooter and shooter.Attribute or ""
+    
+    local shooterData = DataManager.GetShooterFromInventory(owner, id)
+    local attributeName = shooterData and shooterData.Attribute or "Slasher"
     
     local model = Instance.new("Model")
     model.Name = tier .. "_" .. owner.Name
@@ -107,8 +109,10 @@ local function calculateShot(player: Player, shooterModel: Model): (boolean, num
     
     -- Calculate distance to hoop
     local distance = (root.Position - rim.Position).Magnitude
-    local shooterConfig = Config.Shooters[tier]
-    local attrName = shooterConfig and shooterConfig.Attribute
+    
+    local id = shooterModel:GetAttribute("ShooterId") :: string
+    local shooterData = DataManager.GetShooterFromInventory(player, id)
+    local attrName = shooterData and shooterData.Attribute or "Slasher"
     
     local shotStats = Config.GetShotStats(distance, attrName)
     local finalAccuracy = shotStats.Accuracy
@@ -123,7 +127,7 @@ local function calculateShot(player: Player, shooterModel: Model): (boolean, num
     if isMake then
         local playerData = DataManager.Get(player)
         if playerData then
-            local baseYield = shooterConfig and shooterConfig.BaseYield or 0
+            local baseYield = shooterData and shooterData.BaseYield or (Config.Shooters[tier] and Config.Shooters[tier].BaseYield or 0)
             local hoopLevel = playerData.HoopUpgradeLevel or 1
             local hoopMultiplier = Config.Hoops[hoopLevel] and Config.Hoops[hoopLevel].Multiplier or 1
             local rebirths = playerData.Rebirths or 0
@@ -138,9 +142,9 @@ end
 
 -- The autonomous firing loop for an individual shooter model
 local function startShootingLoop(player: Player, shooterModel: Model)
-    local tier = shooterModel:GetAttribute("ShooterTier") :: string
-    local shooterConfig = Config.Shooters[tier]
-    local cooldown = shooterConfig and shooterConfig.Cooldown or 5
+    local id = shooterModel:GetAttribute("ShooterId") :: string
+    local shooterData = DataManager.GetShooterFromInventory(player, id)
+    local cooldown = shooterData and shooterData.Cooldown or 5
     
     local thread = task.spawn(function()
         while shooterModel.Parent ~= nil do
@@ -354,15 +358,19 @@ function ShooterManager.RecalculatePassiveRate(player: Player)
         local tier = shooterModel:GetAttribute("ShooterTier") :: string?
         if not tier then continue end
 
-        local cfg = Config.Shooters[tier]
+        local id = shooterModel:GetAttribute("ShooterId") :: string?
+        if not id then continue end
+        local shooterData = DataManager.GetShooterFromInventory(player, id)
+        if not shooterData then continue end
+
         local root = shooterModel.PrimaryPart
-        if not cfg or not root then continue end
+        if not root then continue end
 
         local distance = (root.Position - rim.Position).Magnitude
-        local shotStats = Config.GetShotStats(distance, cfg.Attribute)
+        local shotStats = Config.GetShotStats(distance, shooterData.Attribute)
         
         -- Expected cash/sec = (BaseYield × zoneMult × accuracy) / cooldown
-        totalRate += (cfg.BaseYield * shotStats.Multiplier * shotStats.Accuracy) / cfg.Cooldown
+        totalRate += (shooterData.BaseYield * shotStats.Multiplier * shotStats.Accuracy) / shooterData.Cooldown
     end
 
     -- Apply hoop multiplier
@@ -387,23 +395,31 @@ local function handleEquipShooter(player: Player, tier: string): (boolean, strin
         return false, "Court is full! Max " .. maxActive .. " shooters."
     end
     
-    local owned = data.OwnedShooters and data.OwnedShooters[tier] or 0
-    if owned <= 0 then
-        return false, "You don't own any " .. tier .. " shooters!"
-    end
-    
-    local equippedCount = 0
-    for _, item in ipairs(data.ShooterPositions) do
-        if item.Tier == tier then
-            equippedCount += 1
+    -- Find an unequipped shooter of this tier
+    local unequippedId = nil
+    if data.ShooterInventory then
+        for _, item in ipairs(data.ShooterInventory) do
+            if item.Tier == tier then
+                local isEquipped = false
+                for _, posItem in ipairs(data.ShooterPositions) do
+                    if posItem.Id == item.Id then
+                        isEquipped = true
+                        break
+                    end
+                end
+                if not isEquipped then
+                    unequippedId = item.Id
+                    break
+                end
+            end
         end
     end
     
-    if equippedCount >= owned then
-        return false, "All owned " .. tier .. " shooters are already equipped!"
+    if not unequippedId then
+        return false, "No unequipped " .. tier .. " available!"
     end
     
-    local id = game:GetService("HttpService"):GenerateGUID(false)
+    local id = unequippedId
     local existingCount = #data.ShooterPositions
     
     local offsetMultiplierX = (existingCount % 3) - 1

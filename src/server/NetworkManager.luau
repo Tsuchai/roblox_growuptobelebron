@@ -14,31 +14,36 @@ local lastShotTimes: { [Player]: number } = {}
 
 -- Helper to safely create remotes on startup
 local function setupRemotes()
-    remotesFolder = ReplicatedStorage:FindFirstChild("Remotes") :: Folder
-    if not remotesFolder then
-        remotesFolder = Instance.new("Folder")
-        remotesFolder.Name = "Remotes"
-        remotesFolder.Parent = ReplicatedStorage
+    local existingFolder = ReplicatedStorage:FindFirstChild("Remotes")
+    if existingFolder then
+        remotesFolder = existingFolder :: Folder
+    else
+        local newFolder = Instance.new("Folder")
+        newFolder.Name = "Remotes"
+        newFolder.Parent = ReplicatedStorage
+        remotesFolder = newFolder
     end
     
     local function getOrCreateRemoteEvent(name: string): RemoteEvent
-        local event = remotesFolder:FindFirstChild(name)
-        if not event then
-            event = Instance.new("RemoteEvent")
-            event.Name = name
-            event.Parent = remotesFolder
+        local existingEvent = remotesFolder:FindFirstChild(name)
+        if existingEvent then
+            return existingEvent :: RemoteEvent
         end
-        return event :: RemoteEvent
+        local newEvent = Instance.new("RemoteEvent")
+        newEvent.Name = name
+        newEvent.Parent = remotesFolder
+        return newEvent
     end
     
     local function getOrCreateRemoteFunction(name: string): RemoteFunction
-        local func = remotesFolder:FindFirstChild(name)
-        if not func then
-            func = Instance.new("RemoteFunction")
-            func.Name = name
-            func.Parent = remotesFolder
+        local existingFunc = remotesFolder:FindFirstChild(name)
+        if existingFunc then
+            return existingFunc :: RemoteFunction
         end
-        return func :: RemoteFunction
+        local newFunc = Instance.new("RemoteFunction")
+        newFunc.Name = name
+        newFunc.Parent = remotesFolder
+        return newFunc
     end
     
     getOrCreateRemoteEvent("ShootRequest")
