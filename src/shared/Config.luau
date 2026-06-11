@@ -22,46 +22,37 @@ Config.StartingStats = {
 Config.MaxActiveShooters = 5
 
 
--- Distance Zones Configuration
--- Distance measured in Studs from the Hoop Rim center
-Config.DistanceZones = {
-    Paint = {
-        MaxDistance = 15,
-        Multiplier = 1.0,
-        BaseAccuracy = 0.95, -- 95% make chance
-        Name = "Paint"
-    },
-    MidRange = {
-        MaxDistance = 30,
-        Multiplier = 1.5,
-        BaseAccuracy = 0.70, -- 70% make chance
-        Name = "Mid-Range"
-    },
-    ThreePoint = {
-        MaxDistance = 9999, -- anything past mid-range
-        Multiplier = 3.0,
-        BaseAccuracy = 0.45, -- 45% make chance
-        Name = "3-Point Line"
-    }
+-- Dynamic Shot Formula Constants
+Config.ShotScaling = {
+    MaxDistance = 60, -- roughly corner-to-corner on the half court
+    BaseAccuracyClose = 0.95,
+    BaseAccuracyFar = 0.35,
+    BaseMultiplierClose = 1.0,
+    BaseMultiplierFar = 4.0,
 }
 
--- Shooter Attributes / Tags
--- These modify the stats of a shooter based on where they are placed
+-- Shooter Attributes now use dynamic curves instead of discrete zones
 Config.Attributes = {
     Slasher = {
         DisplayName = "Slasher",
-        PaintAccuracyBonus = 0.05, -- +5% accuracy in the paint
-        PaintMultiplier = 1.5,     -- 1.5x score multiplier in the paint
+        PeakDistance = 0,     -- Peaks at 0 studs (right under hoop)
+        Falloff = 20,         -- Bonus falls off to 0 after 20 studs
+        MaxAccuracyBonus = 0.10,
+        MaxMultiplierBonus = 0.5,
     },
     MidRangeDeadeye = {
         DisplayName = "Mid-Range Deadeye",
-        MidRangeAccuracyBonus = 0.15,
-        MidRangeMultiplier = 1.5,
+        PeakDistance = 25,    -- Peaks around 25 studs
+        Falloff = 15,         -- Bonus falls off 15 studs away from peak
+        MaxAccuracyBonus = 0.15,
+        MaxMultiplierBonus = 0.8,
     },
     LimitlessRange = {
         DisplayName = "Limitless Range",
-        ThreePointAccuracyBonus = 0.25, -- +25% accuracy from 3pt line
-        ThreePointMultiplier = 2.0,    -- 2.0x score multiplier from 3pt line
+        PeakDistance = 50,    -- Peaks at 50 studs (deep 3)
+        Falloff = 30,         -- Starts applying 30 studs before peak (at 20 studs)
+        MaxAccuracyBonus = 0.25,
+        MaxMultiplierBonus = 2.0,
     }
 }
 
@@ -140,15 +131,39 @@ Config.PlayerShot = {
     PassiveScaleFactor = 0.5,
 }
 
--- Helper function to determine which distance zone a shooter is in
-function Config.GetDistanceZone(distance: number): any
-    if distance <= Config.DistanceZones.Paint.MaxDistance then
-        return Config.DistanceZones.Paint
-    elseif distance <= Config.DistanceZones.MidRange.MaxDistance then
-        return Config.DistanceZones.MidRange
-    else
-        return Config.DistanceZones.ThreePoint
+-- Returns the dynamically calculated accuracy and multiplier for a given distance and optional attribute
+function Config.GetShotStats(distance: number, attributeName: string?): { Accuracy: number, Multiplier: number, Name: string }
+    -- Base linear scaling
+    local t = math.clamp(distance / Config.ShotScaling.MaxDistance, 0, 1)
+    
+    local baseAccuracy = Config.ShotScaling.BaseAccuracyClose + (Config.ShotScaling.BaseAccuracyFar - Config.ShotScaling.BaseAccuracyClose) * t
+    local baseMultiplier = Config.ShotScaling.BaseMultiplierClose + (Config.ShotScaling.BaseMultiplierFar - Config.ShotScaling.BaseMultiplierClose) * t
+    
+    local finalAccuracy = baseAccuracy
+    local finalMultiplier = baseMultiplier
+    
+    -- Apply dynamic attribute curves
+    if attributeName and Config.Attributes[attributeName] then
+        local attr = Config.Attributes[attributeName]
+        local distFromPeak = math.abs(distance - attr.PeakDistance)
+        
+        -- Linear falloff from peak
+        local bonusT = math.clamp(1 - (distFromPeak / attr.Falloff), 0, 1)
+        
+        finalAccuracy += attr.MaxAccuracyBonus * bonusT
+        finalMultiplier += attr.MaxMultiplierBonus * bonusT
     end
+    
+    -- Determine a dynamic name for flavor
+    local zoneName = "Paint"
+    if distance > 30 then zoneName = "3-Point"
+    elseif distance > 15 then zoneName = "Mid-Range" end
+    
+    return {
+        Accuracy = math.clamp(finalAccuracy, 0, 1),
+        Multiplier = finalMultiplier,
+        Name = zoneName
+    }
 end
 
 -- Helper functions for scaling

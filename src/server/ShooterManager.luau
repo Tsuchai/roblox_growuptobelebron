@@ -107,33 +107,13 @@ local function calculateShot(player: Player, shooterModel: Model): (boolean, num
     
     -- Calculate distance to hoop
     local distance = (root.Position - rim.Position).Magnitude
-    local zone = Config.GetDistanceZone(distance)
-    local zoneMult = zone.Multiplier
-    local zoneName = zone.Name
-    
-    -- Apply Attribute Bonuses
     local shooterConfig = Config.Shooters[tier]
     local attrName = shooterConfig and shooterConfig.Attribute
-    local attrConfig = attrName and Config.Attributes[attrName]
     
-    local finalAccuracy = zone.BaseAccuracy
-    local finalMultiplier = zoneMult
-    
-    if attrConfig then
-        if zoneName == "Paint" and attrConfig.PaintAccuracyBonus then
-            finalAccuracy = finalAccuracy + attrConfig.PaintAccuracyBonus
-            finalMultiplier = finalMultiplier * (attrConfig.PaintMultiplier or 1)
-        elseif zoneName == "Mid-Range" and attrConfig.MidRangeAccuracyBonus then
-            finalAccuracy = finalAccuracy + attrConfig.MidRangeAccuracyBonus
-            finalMultiplier = finalMultiplier * (attrConfig.MidRangeMultiplier or 1)
-        elseif zoneName == "3-Point Line" and attrConfig.ThreePointAccuracyBonus then
-            finalAccuracy = finalAccuracy + attrConfig.ThreePointAccuracyBonus
-            finalMultiplier = finalMultiplier * (attrConfig.ThreePointMultiplier or 1)
-        end
-    end
-    
-    -- Cap accuracy
-    finalAccuracy = math.clamp(finalAccuracy, 0, 1)
+    local shotStats = Config.GetShotStats(distance, attrName)
+    local finalAccuracy = shotStats.Accuracy
+    local finalMultiplier = shotStats.Multiplier
+    local zoneName = shotStats.Name
     
     -- Roll make/miss
     local isMake = math.random() <= finalAccuracy
@@ -379,29 +359,10 @@ function ShooterManager.RecalculatePassiveRate(player: Player)
         if not cfg or not root then continue end
 
         local distance = (root.Position - rim.Position).Magnitude
-        local zone = Config.GetDistanceZone(distance)
-
-        local accuracy   = zone.BaseAccuracy
-        local multiplier = zone.Multiplier
-
-        local attrCfg = cfg.Attribute and Config.Attributes[cfg.Attribute]
-        if attrCfg then
-            if zone.Name == "Paint" and attrCfg.PaintAccuracyBonus then
-                accuracy   += attrCfg.PaintAccuracyBonus
-                multiplier *= (attrCfg.PaintMultiplier or 1)
-            elseif zone.Name == "Mid-Range" and attrCfg.MidRangeAccuracyBonus then
-                accuracy   += attrCfg.MidRangeAccuracyBonus
-                multiplier *= (attrCfg.MidRangeMultiplier or 1)
-            elseif zone.Name == "3-Point Line" and attrCfg.ThreePointAccuracyBonus then
-                accuracy   += attrCfg.ThreePointAccuracyBonus
-                multiplier *= (attrCfg.ThreePointMultiplier or 1)
-            end
-        end
-
-        accuracy = math.clamp(accuracy, 0, 1)
-
+        local shotStats = Config.GetShotStats(distance, cfg.Attribute)
+        
         -- Expected cash/sec = (BaseYield × zoneMult × accuracy) / cooldown
-        totalRate += (cfg.BaseYield * multiplier * accuracy) / cfg.Cooldown
+        totalRate += (cfg.BaseYield * shotStats.Multiplier * shotStats.Accuracy) / cfg.Cooldown
     end
 
     -- Apply hoop multiplier

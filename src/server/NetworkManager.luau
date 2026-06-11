@@ -78,9 +78,9 @@ local function handleShootRequest(player: Player)
     local distance = (origin - target).Magnitude
     
     -- Determine distance zone
-    local zone = Config.GetDistanceZone(distance)
-    local accuracy = zone.BaseAccuracy
-    local multiplier = zone.Multiplier
+    local shotStats = Config.GetShotStats(distance, nil)
+    local accuracy = shotStats.Accuracy
+    local multiplier = shotStats.Multiplier
     
     -- Roll for shot make/miss
     local isMake = math.random() <= accuracy

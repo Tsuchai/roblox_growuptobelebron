@@ -45,29 +45,10 @@ local function calculatePassiveRate(data: any): number
         if tier and posArray and #posArray == 3 then
             local pos = Vector3.new(posArray[1], posArray[2], posArray[3])
             local distance = (pos - rimRelativePos).Magnitude
-            local zone = Config.GetDistanceZone(distance)
-            
-            local accuracy = zone.BaseAccuracy
-            local multiplier = zone.Multiplier
-            
             local cfg = Config.Shooters[tier]
             if cfg then
-                local attrCfg = cfg.Attribute and Config.Attributes[cfg.Attribute]
-                if attrCfg then
-                    if zone.Name == "Paint" and attrCfg.PaintAccuracyBonus then
-                        accuracy += attrCfg.PaintAccuracyBonus
-                        multiplier *= (attrCfg.PaintMultiplier or 1)
-                    elseif zone.Name == "Mid-Range" and attrCfg.MidRangeAccuracyBonus then
-                        accuracy += attrCfg.MidRangeAccuracyBonus
-                        multiplier *= (attrCfg.MidRangeMultiplier or 1)
-                    elseif zone.Name == "3-Point Line" and attrCfg.ThreePointAccuracyBonus then
-                        accuracy += attrCfg.ThreePointAccuracyBonus
-                        multiplier *= (attrCfg.ThreePointMultiplier or 1)
-                    end
-                end
-                
-                accuracy = math.clamp(accuracy, 0, 1)
-                rate += (cfg.BaseYield * multiplier * accuracy) / cfg.Cooldown
+                local shotStats = Config.GetShotStats(distance, cfg.Attribute)
+                rate += (cfg.BaseYield * shotStats.Multiplier * shotStats.Accuracy) / cfg.Cooldown
             end
         end
     end
