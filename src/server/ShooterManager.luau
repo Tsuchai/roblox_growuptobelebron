@@ -385,8 +385,8 @@ function ShooterManager.RecalculatePassiveRate(player: Player)
     player:SetAttribute("PassiveRate", totalRate)
 end
 
--- Equips a shooter from inventory
-local function handleEquipShooter(player: Player, tier: string): (boolean, string)
+-- Equips a shooter from inventory by its unique ID
+local function handleEquipShooter(player: Player, id: string): (boolean, string)
     local data = DataManager.Get(player)
     if not data then return false, "No player data" end
     
@@ -395,32 +395,28 @@ local function handleEquipShooter(player: Player, tier: string): (boolean, strin
         return false, "Court is full! Max " .. maxActive .. " shooters."
     end
     
-    -- Find an unequipped shooter of this tier
-    local unequippedId = nil
+    local shooterData = nil
     if data.ShooterInventory then
         for _, item in ipairs(data.ShooterInventory) do
-            if item.Tier == tier then
-                local isEquipped = false
-                for _, posItem in ipairs(data.ShooterPositions) do
-                    if posItem.Id == item.Id then
-                        isEquipped = true
-                        break
-                    end
-                end
-                if not isEquipped then
-                    unequippedId = item.Id
-                    break
-                end
+            if item.Id == id then
+                shooterData = item
+                break
             end
         end
     end
     
-    if not unequippedId then
-        return false, "No unequipped " .. tier .. " available!"
+    if not shooterData then
+        return false, "Shooter not found in your inventory!"
     end
     
-    local id = unequippedId
+    for _, posItem in ipairs(data.ShooterPositions) do
+        if posItem.Id == id then
+            return false, "This shooter is already on the court!"
+        end
+    end
+    
     local existingCount = #data.ShooterPositions
+    local tier = shooterData.Tier
     
     local offsetMultiplierX = (existingCount % 3) - 1
     local offsetMultiplierZ = math.floor(existingCount / 3)

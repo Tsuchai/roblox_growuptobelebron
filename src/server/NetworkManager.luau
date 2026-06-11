@@ -55,6 +55,7 @@ local function setupRemotes()
     getOrCreateRemoteFunction("RebirthRequest")
     getOrCreateRemoteFunction("EquipShooter")
     getOrCreateRemoteFunction("UnequipShooter")
+    getOrCreateRemoteFunction("GetRoster")
 end
 
 -- Active click shooting handler
@@ -134,6 +135,17 @@ function NetworkManager.Initialize()
     Players.PlayerRemoving:Connect(function(player)
         lastShotTimes[player] = nil
     end)
+    
+    
+    local getRoster = remotesFolder:WaitForChild("GetRoster") :: RemoteFunction
+    
+    getRoster.OnServerInvoke = function(player)
+        local data = DataManager.Get(player)
+        if data then
+            return data.ShooterInventory or {}, data.ShooterPositions or {}
+        end
+        return {}, {}
+    end
     
     print("[Server] NetworkManager Initialized!")
 end
