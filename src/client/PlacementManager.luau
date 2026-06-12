@@ -162,8 +162,20 @@ local function startPlacement(model: Model)
                 local rim = hoop and hoop:FindFirstChild("Rim") :: BasePart?
                 local lookTarget = rim and rim.Position or Vector3.new(targetPos.X, 2.5, targetPos.Z - 10)
                 
+                local plotCenter = plot and plot:GetAttribute("CenterPosition") :: Vector3?
+                local finalX, finalZ = targetPos.X, targetPos.Z
+                
+                if plotCenter then
+                    local relX = targetPos.X - plotCenter.X
+                    local relZ = targetPos.Z - plotCenter.Z
+                    local clampedX = math.clamp(relX, -18, 18)
+                    local clampedZ = math.clamp(relZ, -33, 23)
+                    finalX = plotCenter.X + clampedX
+                    finalZ = plotCenter.Z + clampedZ
+                end
+                
                 root.CFrame = CFrame.new(
-                    Vector3.new(targetPos.X, targetPos.Y + 2.0, targetPos.Z), -- offset leg height
+                    Vector3.new(finalX, targetPos.Y + 2.0, finalZ),
                     Vector3.new(lookTarget.X, targetPos.Y + 2.0, lookTarget.Z)
                 )
             end

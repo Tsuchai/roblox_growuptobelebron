@@ -77,11 +77,76 @@ local function refreshTeamUI()
             if child:IsA("Frame") then child:Destroy() end
         end
         
+        -- Count unequipped per tier for Merge System
+        local unequippedByTier = {Rookie=0, College=0, Pro=0, AllStar=0, LeBron=0}
+        for _, item in ipairs(inventory) do
+            if not equippedIds[item.Id] then
+                unequippedByTier[item.Tier] += 1
+            end
+        end
+        
+        local totalCards = 0
+        local orderedTiers = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
+        
+        -- Build Merge/Fuse Cards first (so they appear at the top)
+        local buyUpgrade = remotes:WaitForChild("BuyUpgrade") :: RemoteFunction
+        for i, tier in ipairs(orderedTiers) do
+            if tier == "LeBron" then continue end
+            if unequippedByTier[tier] >= (Config.MergeRequiredCount or 3) then
+                totalCards += 1
+                local nextTier = orderedTiers[i + 1]
+                
+                local card = Instance.new("Frame")
+                card.BackgroundColor3 = Color3.fromRGB(80, 40, 100) -- Purple merge color
+                card.Size = UDim2.new(0, 225, 0, 80)
+                card.Parent = benchContainer
+                Instance.new("UICorner", card).CornerRadius = UDim.new(0.1, 0)
+                
+                local nameLbl = Instance.new("TextLabel")
+                nameLbl.Size = UDim2.new(0.6, 0, 0.4, 0)
+                nameLbl.Position = UDim2.new(0.05, 0, 0.1, 0)
+                nameLbl.BackgroundTransparency = 1
+                nameLbl.Font = Enum.Font.SourceSansBold
+                nameLbl.Text = "Merge " .. tier .. "s"
+                nameLbl.TextColor3 = Color3.new(1, 1, 1)
+                nameLbl.TextScaled = true
+                nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+                nameLbl.Parent = card
+                
+                local statsLbl = Instance.new("TextLabel")
+                statsLbl.Size = UDim2.new(0.65, 0, 0.4, 0)
+                statsLbl.Position = UDim2.new(0.05, 0, 0.50, 0)
+                statsLbl.BackgroundTransparency = 1
+                statsLbl.Font = Enum.Font.SourceSans
+                statsLbl.Text = "Fuse 3 to get 1 " .. nextTier .. "!"
+                statsLbl.TextColor3 = Color3.fromRGB(200, 150, 255)
+                statsLbl.TextScaled = true
+                statsLbl.TextXAlignment = Enum.TextXAlignment.Left
+                statsLbl.Parent = card
+                
+                local mergeBtn = Instance.new("TextButton")
+                mergeBtn.Size = UDim2.new(0, 65, 0, 36)
+                mergeBtn.Position = UDim2.new(0.68, 0, 0.25, 0)
+                mergeBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 200)
+                mergeBtn.Font = Enum.Font.FredokaOne
+                mergeBtn.Text = "FUSE"
+                mergeBtn.TextColor3 = Color3.new(1, 1, 1)
+                mergeBtn.TextSize = 14
+                mergeBtn.Parent = card
+                Instance.new("UICorner", mergeBtn).CornerRadius = UDim.new(0.2, 0)
+                
+                mergeBtn.MouseButton1Click:Connect(function()
+                    mergeBtn.Text = "..."
+                    local success, msg = buyUpgrade:InvokeServer("Merge", tier)
+                    if success then refreshTeamUI() else mergeBtn.Text = "FUSE" end
+                end)
+            end
+        end
+        
         -- Build Bench Cards (Bottom) for unequipped shooters
-        local unequippedCount = 0
         for _, item in ipairs(inventory) do
             if equippedIds[item.Id] then continue end
-            unequippedCount += 1
+            totalCards += 1
             
             local cfg = Config.Shooters[item.Tier]
             local displayName = cfg and cfg.DisplayName or item.Tier
@@ -133,7 +198,7 @@ local function refreshTeamUI()
         end
         
         -- Resize scroll canvas based on items
-        local rows = math.ceil(unequippedCount / 2)
+        local rows = math.ceil(totalCards / 2)
         benchContainer.CanvasSize = UDim2.new(0, 0, 0, rows * 90)
     end)
 end

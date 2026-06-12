@@ -301,6 +301,32 @@ function DataManager.GetShooterFromInventory(player: Player, id: string): any?
     return nil
 end
 
+-- Removes a specific shooter from the inventory by ID
+function DataManager.RemoveShooterFromInventory(player: Player, id: string)
+    local profile = profiles[player]
+    if not profile then return false end
+    local data = profile.Data
+    if not data.ShooterInventory then return false end
+    
+    for i, item in ipairs(data.ShooterInventory) do
+        if item.Id == id then
+            local tier = item.Tier
+            table.remove(data.ShooterInventory, i)
+            
+            -- Update client count attribute
+            local currentCount = player:GetAttribute("Shooter_" .. tier) or 0
+            if currentCount > 0 then
+                player:SetAttribute("Shooter_" .. tier, currentCount - 1)
+            end
+            
+            -- Also remove from active positions if they were somehow equipped
+            DataManager.RemoveShooterPosition(player, id)
+            return true
+        end
+    end
+    return false
+end
+
 -- Appends a new shooter position entry to the player's ShooterPositions list.
 function DataManager.AddShooterPosition(player: Player, id: string, tier: string, relativePos: Vector3)
     local profile = profiles[player]

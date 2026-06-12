@@ -15,8 +15,7 @@ local shopFrame: Frame
 local scrollingFrame: ScrollingFrame
 local toggleButton: TextButton
 
--- Cache for dynamically updating cards
-local shooterCards: { [string]: { CostLabel: TextLabel, OwnedLabel: TextLabel, BuyBtn: TextButton } } = {}
+local rollCards: { [string]: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } } = {}
 local hoopCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
 local rebirthCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
 local playerUpgradeCard: { CostLabel: TextLabel, TitleLabel: TextLabel, BuyBtn: TextButton } = {} :: any
@@ -34,17 +33,15 @@ local function refreshShop()
     local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
     local playerUpgradeLevel = localPlayer:GetAttribute("PlayerUpgradeLevel") or 1
     
-    -- 1. Update Shooter Cards
-    for tier, card in pairs(shooterCards) do
-        local owned = localPlayer:GetAttribute("Shooter_" .. tier) or 0
-        local cost = Config.GetShooterCost(tier, owned)
-        
-        card.OwnedLabel.Text = "Owned: " .. owned
+    -- 1. Update Roll Cards
+    for rollType, card in pairs(rollCards) do
+        local rConfig = Config.Rolls[rollType]
+        local cost = rConfig.Cost
         card.CostLabel.Text = "$" .. FormatNumber.format(cost)
         
         if cash >= cost then
             card.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Green
-            card.BuyBtn.Text = "BUY"
+            card.BuyBtn.Text = "ROLL"
             card.BuyBtn.Active = true
         else
             card.BuyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40) -- Dark Red
@@ -117,6 +114,86 @@ local function refreshShop()
         rebirthCard.BuyBtn.Text = "LOCK"
         rebirthCard.BuyBtn.Active = false
     end
+end
+
+-- Flashy Spin Animation
+local function playSpinAnimation(rolledTier: string)
+    shopFrame.Visible = false -- Hide shop during roll
+    
+    local spinFrame = Instance.new("Frame")
+    spinFrame.Size = UDim2.new(1, 0, 1, 0)
+    spinFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    spinFrame.BackgroundTransparency = 0.5
+    spinFrame.BorderSizePixel = 0
+    spinFrame.Parent = screenGui
+    
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0, 0, 0, 0) -- Starts tiny
+    card.Position = UDim2.new(0.5, 0, 0.5, 0)
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
+    card.Parent = spinFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0.1, 0)
+    corner.Parent = card
+    
+    local textLbl = Instance.new("TextLabel")
+    textLbl.Size = UDim2.new(1, 0, 1, 0)
+    textLbl.BackgroundTransparency = 1
+    textLbl.Font = Enum.Font.FredokaOne
+    textLbl.Text = "?"
+    textLbl.TextColor3 = Color3.new(1, 1, 1)
+    textLbl.TextScaled = true
+    textLbl.Parent = card
+    
+    -- Pop in
+    local t1 = TweenService:Create(card, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Size = UDim2.new(0, 200, 0, 300)})
+    t1:Play()
+    t1.Completed:Wait()
+    
+    -- Flashing spin phase
+    local tiers = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
+    local colors = {Color3.fromRGB(120,120,120), Color3.new(0,1,0), Color3.new(0,0,1), Color3.new(1,0,1), Color3.new(1,0.8,0)}
+    
+    for i = 1, 20 do
+        local randomIdx = math.random(1, #tiers)
+        textLbl.Text = Config.Shooters[tiers[randomIdx]].DisplayName
+        card.BackgroundColor3 = colors[randomIdx]
+        
+        -- Slow down the tick as it reaches the end
+        local waitTime = 0.05 + (i * 0.01)
+        task.wait(waitTime)
+    end
+    
+    -- Final Result Reveal
+    local finalColor = Color3.fromRGB(120, 120, 120) -- Grey for Rookie
+    if rolledTier == "LeBron" then finalColor = Color3.fromRGB(255, 215, 0)
+    elseif rolledTier == "AllStar" then finalColor = Color3.fromRGB(200, 0, 255)
+    elseif rolledTier == "Pro" then finalColor = Color3.fromRGB(0, 100, 255)
+    elseif rolledTier == "College" then finalColor = Color3.fromRGB(0, 200, 50) end
+    
+    card.BackgroundColor3 = finalColor
+    textLbl.Text = Config.Shooters[rolledTier].DisplayName
+    
+    -- Dramatic pump
+    local t2 = TweenService:Create(card, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, 250, 0, 375)})
+    t2:Play()
+    t2.Completed:Wait()
+    local t3 = TweenService:Create(card, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {Size = UDim2.new(0, 200, 0, 300)})
+    t3:Play()
+    t3.Completed:Wait()
+    
+    task.wait(1.5)
+    
+    -- Fade out
+    local t4 = TweenService:Create(spinFrame, TweenInfo.new(0.5), {BackgroundTransparency = 1})
+    local t5 = TweenService:Create(card, TweenInfo.new(0.5), {BackgroundTransparency = 1})
+    local t6 = TweenService:Create(textLbl, TweenInfo.new(0.5), {TextTransparency = 1})
+    t4:Play() t5:Play() t6:Play()
+    t4.Completed:Wait()
+    
+    spinFrame:Destroy()
 end
 
 -- Programmatic UI Construction helper
@@ -216,7 +293,7 @@ local function buildShopUI(playerGui: PlayerGui)
     local layoutOrder = 1
     
     -- Helper to build an item card row
-    local function createItemCard(title: string, desc: string, isShooter: boolean, shooterTier: string?): Frame
+    local function createItemCard(title: string, desc: string, isRoll: boolean, rollType: string?): Frame
         local card = Instance.new("Frame")
         card.Size = UDim2.new(1, -10, 0, 70)
         card.BackgroundColor3 = Color3.fromRGB(40, 40, 45)
@@ -271,7 +348,7 @@ local function buildShopUI(playerGui: PlayerGui)
         buyBtn.Position = UDim2.new(0.78, 0, 0.2, 0)
         buyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
         buyBtn.Font = Enum.Font.FredokaOne
-        buyBtn.Text = "BUY"
+        buyBtn.Text = isRoll and "ROLL" or "BUY"
         buyBtn.TextColor3 = Color3.new(1, 1, 1)
         buyBtn.TextSize = 16
         buyBtn.BorderSizePixel = 0
@@ -292,17 +369,22 @@ local function buildShopUI(playerGui: PlayerGui)
         ownedLbl.TextSize = 11
         ownedLbl.Parent = card
         
-        if not isShooter then
+        if isRoll then
             ownedLbl.Visible = false
         end
         
-        -- Wire up purchase click animations and server invocations
         buyBtn.MouseButton1Click:Connect(function()
-            if isShooter and shooterTier then
-                local success, msg = buyUpgrade:InvokeServer("Shooter", shooterTier)
-                if success then
-                    refreshShop()
+            if isRoll and rollType then
+                -- Disable button to prevent double-click during animation
+                buyBtn.Active = false
+                buyBtn.Text = "..."
+                local success, rolledTierOrMsg = buyUpgrade:InvokeServer("Roll", rollType)
+                if success and rolledTierOrMsg then
+                    playSpinAnimation(rolledTierOrMsg)
+                else
+                    warn(rolledTierOrMsg)
                 end
+                refreshShop()
             elseif title == "Upgrade Hoop" then
                 local success, msg = buyUpgrade:InvokeServer("Hoop", "")
                 if success then
@@ -322,10 +404,10 @@ local function buildShopUI(playerGui: PlayerGui)
         end)
         
         -- Cache elements
-        if isShooter and shooterTier then
-            shooterCards[shooterTier] = {
+        if isRoll and rollType then
+            rollCards[rollType] = {
                 CostLabel = costLbl,
-                OwnedLabel = ownedLbl,
+                TitleLabel = titleLbl,
                 BuyBtn = buyBtn
             }
         elseif title == "Upgrade Hoop" then
@@ -351,15 +433,10 @@ local function buildShopUI(playerGui: PlayerGui)
         return card
     end
     
-    -- Build Shooter Cards
-    -- Tiers in order of pricing config
-    local orderedTiers = {"Rookie", "College", "Pro", "AllStar", "LeBron"}
-    for _, tier in ipairs(orderedTiers) do
-        local shooter = Config.Shooters[tier]
-        if shooter then
-            local desc = "~" .. shooter.BaseYield .. " Cash, ~" .. shooter.Cooldown .. "s Cooldown (Random Attribute)"
-            createItemCard(shooter.DisplayName, desc, true, tier)
-        end
+    -- Build Roll Cards
+    for rollType, rConfig in pairs(Config.Rolls) do
+        local desc = "Roll for a chance to win higher tier players! (Higher chance of good players in Premium)"
+        createItemCard(rConfig.Name, desc, true, rollType)
     end
     
     -- Build Hoop Upgrade Card

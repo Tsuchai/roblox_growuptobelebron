@@ -21,6 +21,10 @@ Config.StartingStats = {
 -- Maximum number of shooters a player can place on the court
 Config.MaxActiveShooters = 5
 
+-- Inventory Limits & Merging
+Config.MaxInventorySize = 30
+Config.MergeRequiredCount = 3
+
 
 -- Dynamic Shot Formula Constants
 Config.ShotScaling = {
@@ -120,6 +124,32 @@ Config.Shooters = {
             Slasher = 0.0,
             MidRangeDeadeye = 0.0,
             LimitlessRange = 1.0
+        }
+    }
+}
+
+-- Gacha Roll Configuration
+Config.Rolls = {
+    Standard = {
+        Name = "Standard Roll",
+        Cost = 500,
+        Chances = {
+            Rookie = 0.60,
+            College = 0.30,
+            Pro = 0.08,
+            AllStar = 0.015,
+            LeBron = 0.005
+        }
+    },
+    Premium = {
+        Name = "Premium Roll",
+        Cost = 5000,
+        Chances = {
+            Rookie = 0.0,
+            College = 0.15,
+            Pro = 0.60,
+            AllStar = 0.20,
+            LeBron = 0.05
         }
     }
 }

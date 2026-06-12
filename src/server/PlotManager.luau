@@ -8,7 +8,7 @@ local plots: { [number]: Folder } = {}
 local playerAssignments: { [Player]: Folder } = {}
 
 -- Define the layout of a plot relative to its center coordinate
-local PLOT_SIZE = Vector3.new(60, 1, 80)
+local PLOT_SIZE = Vector3.new(60, 0.5, 80)
 local PLOT_SPACING = 80
 local PLOT_Y_OFFSET = 0.5
 
@@ -109,16 +109,29 @@ local function createPhysicalPlot(index: number, center: Vector3): Folder
     court.CanCollide = true
     court.Parent = plotFolder
     
-    -- Court Border Lines (Keys, Three-point line mock)
-    local lines = Instance.new("Part")
-    lines.Name = "ThreePointLineMock"
-    lines.Size = Vector3.new(40.4, 0.05, 0.5)
-    lines.Position = center + Vector3.new(0, PLOT_Y_OFFSET + 0.08, 10)
-    lines.Color = BORDER_COLOR
-    lines.Material = Enum.Material.SmoothPlastic
-    lines.Anchored = true
-    lines.CanCollide = false
-    lines.Parent = plotFolder
+    -- Paint Zone Visual (15 studs from rim)
+    local paintVisual = Instance.new("Part")
+    paintVisual.Name = "PaintVisual"
+    paintVisual.Size = Vector3.new(16, 0.05, 16.7)
+    paintVisual.Position = center + Vector3.new(0, PLOT_Y_OFFSET + 0.1, -26.65)
+    paintVisual.Color = Color3.fromRGB(180, 50, 50) -- Dark red
+    paintVisual.Material = Enum.Material.Wood
+    paintVisual.Anchored = true
+    paintVisual.CanCollide = false
+    paintVisual.CanQuery = false
+    paintVisual.Parent = plotFolder
+    
+    -- 3-Point Line Visual (30 studs from rim)
+    local threePtLine = Instance.new("Part")
+    threePtLine.Name = "ThreePointLine"
+    threePtLine.Size = Vector3.new(40.2, 0.06, 0.5)
+    threePtLine.Position = center + Vector3.new(0, PLOT_Y_OFFSET + 0.11, -2.1)
+    threePtLine.Color = BORDER_COLOR
+    threePtLine.Material = Enum.Material.SmoothPlastic
+    threePtLine.Anchored = true
+    threePtLine.CanCollide = false
+    threePtLine.CanQuery = false
+    threePtLine.Parent = plotFolder
     
     -- Spawner for the player
     local spawnLocation = Instance.new("SpawnLocation")

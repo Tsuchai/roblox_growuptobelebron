@@ -308,9 +308,9 @@ local function handleMoveShooter(player: Player, shooterModel: Model, commandOrP
         local plotCenter = plot:GetAttribute("CenterPosition") :: Vector3
         local relativePos = commandOrPosition - plotCenter
         
-        -- Limit coordinates to the size of the court (40 wide, 60 long)
+        -- Limit coordinates to the size of the court (40 wide, 60 long) with margin
         local clampedX = math.clamp(relativePos.X, -18, 18)
-        local clampedZ = math.clamp(relativePos.Z, -35, 25)
+        local clampedZ = math.clamp(relativePos.Z, -33, 23)
         
         local finalPos = plotCenter + Vector3.new(clampedX, 2.5, clampedZ)
         
