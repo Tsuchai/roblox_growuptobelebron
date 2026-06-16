@@ -131,7 +131,7 @@ Config.Shooters = {
 -- Gacha Roll Configuration
 Config.Rolls = {
     Standard = {
-        Name = "Standard Roll",
+        Name = "Free Agency (Standard)",
         Cost = 500,
         Chances = {
             Rookie = 0.60,
@@ -142,7 +142,7 @@ Config.Rolls = {
         }
     },
     Premium = {
-        Name = "Premium Roll",
+        Name = "Free Agency (Premium)",
         Cost = 5000,
         Chances = {
             Rookie = 0.0,
@@ -151,7 +151,24 @@ Config.Rolls = {
             AllStar = 0.20,
             LeBron = 0.05
         }
+    },
+    SpecialDraft = {
+        Name = "Special Event Draft",
+        Cost = 2500,
+        IsLimitedTime = true,
+        Chances = {
+            Rookie = 0.0,
+            College = 0.0,
+            Pro = 0.40,
+            AllStar = 0.40,
+            LeBron = 0.20
+        }
     }
+}
+
+-- Monetization Config
+Config.Monetization = {
+    TradeUpProductId = 0 -- Developer: Change this to your Developer Product ID for the "Trade Up" purchase!
 }
 
 -- Hoop Upgrades Configuration

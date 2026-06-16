@@ -36,7 +36,7 @@ local function createShooterModel(tier: string, owner: Player, id: string): Mode
     torso.Color = JERSEY_COLORS[tier] or Color3.new(1, 1, 1)
     torso.Material = Enum.Material.SmoothPlastic
     torso.Anchored = true
-    torso.CanCollide = true
+    torso.CanCollide = false
     torso.Parent = model
     model.PrimaryPart = torso
     
@@ -78,15 +78,23 @@ local function createShooterModel(tier: string, owner: Player, id: string): Mode
     weldBand.Part1 = headband
     weldBand.Parent = head
     
-    -- Humanoid (provides name tag and standard physics state)
-    local humanoid = Instance.new("Humanoid")
-    humanoid.MaxHealth = 100
-    humanoid.Health = 100
-    humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
-    humanoid.Parent = model
+    -- Custom Name Tag (replacing Humanoid for better performance and no collision overrides)
+    local billboard = Instance.new("BillboardGui")
+    billboard.Name = "NameTag"
+    billboard.Size = UDim2.new(6, 0, 1.5, 0)
+    billboard.StudsOffset = Vector3.new(0, 1.5, 0)
+    billboard.AlwaysOnTop = true
+    billboard.Parent = head
     
-    -- Customize Name Tag
-    model.Name = displayName .. "\n(" .. attributeName .. ")"
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 1, 0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Text = displayName .. "\n(" .. attributeName .. ")"
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextScaled = true
+    nameLabel.TextColor3 = Color3.new(1, 1, 1)
+    nameLabel.TextStrokeTransparency = 0.5
+    nameLabel.Parent = billboard
     
     -- Tag model with attributes to identify it on the client
     model:SetAttribute("ShooterTier", tier)

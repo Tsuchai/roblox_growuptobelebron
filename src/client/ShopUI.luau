@@ -2,12 +2,20 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local HttpService = game:GetService("HttpService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local FormatNumber = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("FormatNumber"))
 
 local ShopUI = {}
 local localPlayer = Players.LocalPlayer
+
+local function formatTime(seconds: number): string
+    local m = math.floor(seconds / 60)
+    local s = seconds % 60
+    return string.format("%02d:%02d", m, s)
+end
 
 -- UI References
 local screenGui: ScreenGui
@@ -33,20 +41,34 @@ local function refreshShop()
     local hoopLevel = localPlayer:GetAttribute("HoopUpgradeLevel") or 1
     local playerUpgradeLevel = localPlayer:GetAttribute("PlayerUpgradeLevel") or 1
     
+    local draftActiveObj = ReplicatedStorage:FindFirstChild("DraftActive")
+    local isDraftActive = draftActiveObj and draftActiveObj.Value or false
+    local timeLeftObj = ReplicatedStorage:FindFirstChild("DraftTimeLeft")
+    
     -- 1. Update Roll Cards
     for rollType, card in pairs(rollCards) do
         local rConfig = Config.Rolls[rollType]
         local cost = rConfig.Cost
         card.CostLabel.Text = "$" .. FormatNumber.format(cost)
         
-        if cash >= cost then
-            card.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Green
-            card.BuyBtn.Text = "ROLL"
-            card.BuyBtn.Active = true
-        else
-            card.BuyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40) -- Dark Red
-            card.BuyBtn.Text = "LOCK"
+        if rConfig.IsLimitedTime and not isDraftActive then
+            card.BuyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
             card.BuyBtn.Active = false
+            card.BuyBtn.Text = "WAIT " .. formatTime(timeLeftObj and timeLeftObj.Value or 0)
+        else
+            if cash >= cost then
+                card.BuyBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80) -- Green
+                if rConfig.IsLimitedTime then
+                    card.BuyBtn.Text = "DRAFT " .. formatTime(timeLeftObj and timeLeftObj.Value or 0)
+                else
+                    card.BuyBtn.Text = "ROLL"
+                end
+                card.BuyBtn.Active = true
+            else
+                card.BuyBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40) -- Dark Red
+                card.BuyBtn.Text = "LOCK"
+                card.BuyBtn.Active = false
+            end
         end
     end
     
@@ -194,6 +216,191 @@ local function playSpinAnimation(rolledTier: string)
     t4.Completed:Wait()
     
     spinFrame:Destroy()
+end
+
+-- Draft Board Cinematic UI
+local currentDraftBoardUI: Frame? = nil
+local currentPickIndicator: TextLabel? = nil
+local stealBtns: {TextButton} = {}
+
+local function updateDraftBoard(newPick: number, newAwardedPlayer: any)
+    if not currentDraftBoardUI then return end
+    
+    -- Animate the highlight moving up
+    if currentPickIndicator then
+        local targetSlot = currentDraftBoardUI:FindFirstChild("Slot" .. newPick)
+        if targetSlot and targetSlot:IsA("Frame") then
+            local t = TweenService:Create(currentPickIndicator, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = targetSlot.Position - UDim2.new(0, 0, 0, 30)})
+            t:Play()
+            currentPickIndicator.Text = "NEW PICK!"
+            currentPickIndicator.TextColor3 = Color3.fromRGB(0, 255, 100)
+            task.wait(1)
+            currentPickIndicator.Text = "YOUR PICK"
+            currentPickIndicator.TextColor3 = Color3.fromRGB(255, 255, 100)
+        end
+    end
+    
+    -- Hide any steal buttons that are now behind or equal to our new pick
+    for _, btn in ipairs(stealBtns) do
+        local slotIndex = tonumber(btn.Name:match("%d+"))
+        if slotIndex and slotIndex >= newPick then
+            btn.Visible = false
+        end
+    end
+end
+
+local function playDraftBoardAnimation(board: any, userPick: number)
+    shopFrame.Visible = false
+    
+    local draftFrame = Instance.new("Frame")
+    draftFrame.Size = UDim2.new(1, 0, 1, 0)
+    draftFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    draftFrame.BackgroundTransparency = 0.2
+    draftFrame.BorderSizePixel = 0
+    draftFrame.Parent = screenGui
+    currentDraftBoardUI = draftFrame
+    
+    local header = Instance.new("TextLabel")
+    header.Size = UDim2.new(1, 0, 0, 100)
+    header.Position = UDim2.new(0, 0, 0, 50)
+    header.BackgroundTransparency = 1
+    header.Font = Enum.Font.FredokaOne
+    header.Text = "DRAFT BOARD"
+    header.TextColor3 = Color3.fromRGB(255, 215, 0)
+    header.TextSize = 50
+    header.Parent = draftFrame
+    
+    -- Create 5 slots
+    local slotWidth = 150
+    local spacing = 20
+    local totalWidth = (slotWidth * 5) + (spacing * 4)
+    local startX = 0.5
+    
+    for i = 1, 5 do
+        local slot = Instance.new("Frame")
+        slot.Name = "Slot" .. i
+        slot.Size = UDim2.new(0, slotWidth, 0, 220)
+        local offsetX = ((i - 1) * (slotWidth + spacing)) - (totalWidth / 2) + (slotWidth / 2)
+        slot.Position = UDim2.new(0.5, offsetX, 0.5, 0)
+        slot.AnchorPoint = Vector2.new(0.5, 0.5)
+        slot.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+        slot.Parent = draftFrame
+        
+        local corner = Instance.new("UICorner")
+        corner.CornerRadius = UDim.new(0.1, 0)
+        corner.Parent = slot
+        
+        local numLbl = Instance.new("TextLabel")
+        numLbl.Size = UDim2.new(1, 0, 0, 30)
+        numLbl.BackgroundTransparency = 1
+        numLbl.Font = Enum.Font.SourceSansBold
+        numLbl.Text = "#" .. i
+        numLbl.TextColor3 = Color3.fromRGB(150, 150, 150)
+        numLbl.TextSize = 20
+        numLbl.Parent = slot
+        
+        local nameLbl = Instance.new("TextLabel")
+        nameLbl.Size = UDim2.new(1, -10, 1, -40)
+        nameLbl.Position = UDim2.new(0, 5, 0, 30)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Font = Enum.Font.FredokaOne
+        nameLbl.Text = "?"
+        nameLbl.TextColor3 = Color3.new(1, 1, 1)
+        nameLbl.TextScaled = true
+        nameLbl.Parent = slot
+        
+        -- Reveal animation
+        task.wait(0.3)
+        local playerInfo = board[i]
+        local finalColor = Color3.fromRGB(120, 120, 120)
+        if playerInfo.Tier == "LeBron" then finalColor = Color3.fromRGB(255, 215, 0)
+        elseif playerInfo.Tier == "AllStar" then finalColor = Color3.fromRGB(200, 0, 255)
+        elseif playerInfo.Tier == "Pro" then finalColor = Color3.fromRGB(0, 100, 255)
+        elseif playerInfo.Tier == "College" then finalColor = Color3.fromRGB(0, 200, 50) end
+        
+        slot.BackgroundColor3 = finalColor
+        nameLbl.Text = Config.Shooters[playerInfo.Tier].DisplayName .. "\n(" .. playerInfo.Attribute .. ")"
+        
+        local bump = TweenService:Create(slot, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Size = UDim2.new(0, slotWidth + 20, 0, 240)})
+        bump:Play()
+        bump.Completed:Wait()
+        TweenService:Create(slot, TweenInfo.new(0.1), {Size = UDim2.new(0, slotWidth, 0, 220)}):Play()
+    end
+    
+    task.wait(0.5)
+    
+    -- Highlight user pick
+    local userSlot = draftFrame:FindFirstChild("Slot" .. userPick) :: Frame
+    currentPickIndicator = Instance.new("TextLabel")
+    currentPickIndicator.Size = UDim2.new(0, 200, 0, 40)
+    currentPickIndicator.Position = userSlot.Position - UDim2.new(0, 0, 0, 30)
+    currentPickIndicator.AnchorPoint = Vector2.new(0.5, 1)
+    currentPickIndicator.BackgroundTransparency = 1
+    currentPickIndicator.Font = Enum.Font.FredokaOne
+    currentPickIndicator.Text = "YOUR PICK"
+    currentPickIndicator.TextColor3 = Color3.fromRGB(255, 255, 100)
+    currentPickIndicator.TextSize = 24
+    currentPickIndicator.Parent = draftFrame
+    
+    local pulse = TweenService:Create(currentPickIndicator, TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), {TextSize = 28})
+    pulse:Play()
+    
+    -- Steal buttons for every pick above the user
+    stealBtns = {}
+    for i = 1, 4 do
+        if i < userPick then
+            local targetSlot = draftFrame:FindFirstChild("Slot" .. i) :: Frame
+            local stealBtn = Instance.new("TextButton")
+            stealBtn.Name = "StealBtn" .. i
+            stealBtn.Size = UDim2.new(0, 140, 0, 50)
+            stealBtn.Position = targetSlot.Position + UDim2.new(0, 0, 0, 80)
+            stealBtn.AnchorPoint = Vector2.new(0.5, 0)
+            stealBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+            stealBtn.Font = Enum.Font.FredokaOne
+            
+            local productInfo = Config.Monetization.StealPickProducts[i]
+            stealBtn.Text = "STEAL PICK\n(" .. productInfo.DisplayPrice .. " R$)"
+            stealBtn.TextColor3 = Color3.new(1, 1, 1)
+            stealBtn.TextSize = 16
+            stealBtn.Parent = draftFrame
+            
+            local btnCorner = Instance.new("UICorner")
+            btnCorner.CornerRadius = UDim.new(0.2, 0)
+            btnCorner.Parent = stealBtn
+            
+            stealBtn.MouseButton1Click:Connect(function()
+                if productInfo.Id ~= 0 then
+                    MarketplaceService:PromptProductPurchase(localPlayer, productInfo.Id)
+                else
+                    warn("Developer has not set up the Product ID for Steal Pick #" .. i)
+                end
+            end)
+            
+            table.insert(stealBtns, stealBtn)
+        end
+    end
+    
+    -- Close button
+    local closeDraftBtn = Instance.new("TextButton")
+    closeDraftBtn.Size = UDim2.new(0, 200, 0, 50)
+    closeDraftBtn.Position = UDim2.new(0.5, -100, 1, -100)
+    closeDraftBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    closeDraftBtn.Font = Enum.Font.FredokaOne
+    closeDraftBtn.Text = "CLAIM & EXIT"
+    closeDraftBtn.TextColor3 = Color3.new(1, 1, 1)
+    closeDraftBtn.TextSize = 20
+    closeDraftBtn.Parent = draftFrame
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(0.3, 0)
+    closeCorner.Parent = closeDraftBtn
+    
+    closeDraftBtn.MouseButton1Click:Connect(function()
+        draftFrame:Destroy()
+        currentDraftBoardUI = nil
+        currentPickIndicator = nil
+        stealBtns = {}
+    end)
 end
 
 -- Programmatic UI Construction helper
@@ -380,7 +587,14 @@ local function buildShopUI(playerGui: PlayerGui)
                 buyBtn.Text = "..."
                 local success, rolledTierOrMsg = buyUpgrade:InvokeServer("Roll", rollType)
                 if success and rolledTierOrMsg then
-                    playSpinAnimation(rolledTierOrMsg)
+                    if string.sub(rolledTierOrMsg, 1, 1) == "{" then
+                        local draftData = HttpService:JSONDecode(rolledTierOrMsg)
+                        if draftData.Type == "DraftBoard" then
+                            playDraftBoardAnimation(draftData.Board, draftData.UserPick)
+                        end
+                    else
+                        playSpinAnimation(rolledTierOrMsg)
+                    end
                 else
                     warn(rolledTierOrMsg)
                 end
@@ -435,7 +649,9 @@ local function buildShopUI(playerGui: PlayerGui)
     
     -- Build Roll Cards
     for rollType, rConfig in pairs(Config.Rolls) do
-        local desc = "Roll for a chance to win higher tier players! (Higher chance of good players in Premium)"
+        local desc = rConfig.IsLimitedTime 
+            and "A rare draft! Higher chances for high-tier shooters. Only available for 60 seconds!"
+            or "Roll for a chance to win higher tier players! (Higher chance in Premium)"
         createItemCard(rConfig.Name, desc, true, rollType)
     end
     
@@ -476,6 +692,21 @@ function ShopUI.Initialize()
                 refreshShop()
             end
         end
+    end)
+    
+    local draftTimeLeft = ReplicatedStorage:WaitForChild("DraftTimeLeft", 5) :: IntValue?
+    if draftTimeLeft then
+        draftTimeLeft.Changed:Connect(function()
+            if shopFrame.Visible then
+                refreshShop()
+            end
+        end)
+    end
+    
+    local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
+    local draftUpdateEvent = remotes:WaitForChild("DraftUpdate") :: RemoteEvent
+    draftUpdateEvent.OnClientEvent:Connect(function(newPick, newPlayerInfo)
+        updateDraftBoard(newPick, newPlayerInfo)
     end)
     
     print("[Client] ShopUI Initialized!")

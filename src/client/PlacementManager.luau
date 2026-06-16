@@ -60,7 +60,7 @@ function PlacementManager.CancelPlacement()
         -- Make it solid again
         for _, child in ipairs(selectedShooter:GetChildren()) do
             if child:IsA("BasePart") then
-                child.Transparency = (child.Name == "Headband" or child.Name == "Torso") and 0 or child.Transparency
+                child.Transparency = (child.Name == "Headband" or child.Name == "Torso" or child.Name == "Head") and 0 or child.Transparency
             end
         end
     end
@@ -94,7 +94,7 @@ local function confirmPlacement(position: Vector3)
     -- Restore transparency
     for _, child in ipairs(selectedShooter:GetChildren()) do
         if child:IsA("BasePart") then
-            child.Transparency = (child.Name == "Headband" or child.Name == "Torso") and 0 or child.Transparency
+            child.Transparency = (child.Name == "Headband" or child.Name == "Torso" or child.Name == "Head") and 0 or child.Transparency
         end
     end
     

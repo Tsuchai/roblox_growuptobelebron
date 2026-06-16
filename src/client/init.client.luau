@@ -8,10 +8,12 @@ local TeamUI = require(script:WaitForChild("TeamUI"))
 local MilestoneUI = require(script:WaitForChild("MilestoneUI"))
 local HUD = require(script:WaitForChild("HUD"))
 local OfflineUI = require(script:WaitForChild("OfflineUI"))
+local LightingManager = require(script:WaitForChild("LightingManager"))
 
 print("[Client] Initializing Grow Up to be LeBron...")
 
 -- Initialize all client-side managers and UI modules
+LightingManager.Initialize()
 VisualManager.Initialize()
 PlacementManager.Initialize()
 ShopUI.Initialize()

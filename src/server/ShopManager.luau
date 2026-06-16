@@ -1,6 +1,8 @@
 --!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local MarketplaceService = game:GetService("MarketplaceService")
+local HttpService = game:GetService("HttpService")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
 local DataManager = require(script.Parent:WaitForChild("DataManager"))
@@ -62,6 +64,13 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
         local rollConfig = Config.Rolls[upgradeName]
         if not rollConfig then return false, "Invalid roll type" end
         
+        if rollConfig.IsLimitedTime then
+            local draftActive = ReplicatedStorage:FindFirstChild("DraftActive")
+            if not draftActive or not draftActive.Value then
+                return false, "This draft is not currently active!"
+            end
+        end
+        
         local existingInventoryCount = data.ShooterInventory and #data.ShooterInventory or 0
         if existingInventoryCount >= (Config.MaxInventorySize or 30) then
             return false, "Inventory is full! Merge or delete players first."
@@ -71,49 +80,83 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
         if currentCash >= cost then
             DataManager.Set(player, "Cash", currentCash - cost)
             
-            -- Perform the Roll
-            local r = math.random()
-            local cumulative = 0
-            local rolledTier = "Rookie"
-            for tier, chance in pairs(rollConfig.Chances) do
-                cumulative += chance
-                if r <= cumulative then
-                    rolledTier = tier
-                    break
+            -- Standard / Premium Roll Logic
+            if upgradeName ~= "SpecialDraft" then
+                local r = math.random()
+                local cumulative = 0
+                local rolledTier = "Rookie"
+                for tier, chance in pairs(rollConfig.Chances) do
+                    cumulative += chance
+                    if r <= cumulative then
+                        rolledTier = tier
+                        break
+                    end
                 end
-            end
-            
-            local stats = Config.RollShooterStats(rolledTier)
-            local id = game:GetService("HttpService"):GenerateGUID(false)
-            
-            local shooterData = {
-                Id = id,
-                Tier = rolledTier,
-                Attribute = stats.Attribute,
-                BaseYield = stats.BaseYield,
-                Cooldown = stats.Cooldown
-            }
-            
-            local existingCount = data.ShooterPositions and #data.ShooterPositions or 0
-            DataManager.AddShooterToInventory(player, shooterData)
-            
-            if existingCount < (Config.MaxActiveShooters or 5) then
-                local offsetMultiplierX = (existingCount % 3) - 1
-                local offsetMultiplierZ = math.floor(existingCount / 3)
-                local relativePos = Vector3.new(
-                    offsetMultiplierX * 12,
-                    2.0,
-                    15 - (offsetMultiplierZ * 15)
-                )
                 
-                DataManager.AddShooterPosition(player, id, rolledTier, relativePos)
-                -- We wait to spawn the shooter dynamically until after the client animation!
-                -- The client will call an event to spawn it, or we can just spawn it here and let the client handle visuals.
-                -- For now, spawn it immediately, and the client will show the animation overlaying the screen.
-                ShooterManager.SpawnSingleShooter(player, rolledTier, id, relativePos)
+                local stats = Config.RollShooterStats(rolledTier)
+                local id = HttpService:GenerateGUID(false)
+                
+                local shooterData = {
+                    Id = id, Tier = rolledTier, Attribute = stats.Attribute,
+                    BaseYield = stats.BaseYield, Cooldown = stats.Cooldown
+                }
+                
+                local existingCount = data.ShooterPositions and #data.ShooterPositions or 0
+                DataManager.AddShooterToInventory(player, shooterData)
+                
+                if existingCount < (Config.MaxActiveShooters or 5) then
+                    local offsetMultiplierX = (existingCount % 3) - 1
+                    local offsetMultiplierZ = math.floor(existingCount / 3)
+                    local relativePos = Vector3.new(offsetMultiplierX * 12, 2.0, 15 - (offsetMultiplierZ * 15))
+                    DataManager.AddShooterPosition(player, id, rolledTier, relativePos)
+                    ShooterManager.SpawnSingleShooter(player, rolledTier, id, relativePos)
+                end
+                
+                return true, rolledTier
+            else
+                -- Special Draft Logic: Generates a 5-pick board
+                local draftBoard = {}
+                -- Make pick 1 highly likely to be amazing
+                for i = 1, 5 do
+                    local r = math.random()
+                    local rolledTier = "Pro"
+                    if i == 1 then
+                        if r < 0.5 then rolledTier = "LeBron" else rolledTier = "AllStar" end
+                    elseif i == 2 then
+                        if r < 0.2 then rolledTier = "LeBron" elseif r < 0.6 then rolledTier = "AllStar" else rolledTier = "Pro" end
+                    else
+                        local cum = 0
+                        for tier, chance in pairs(rollConfig.Chances) do
+                            cum += chance
+                            if r <= cum then rolledTier = tier; break end
+                        end
+                    end
+                    
+                    local stats = Config.RollShooterStats(rolledTier)
+                    table.insert(draftBoard, {
+                        Id = HttpService:GenerateGUID(false),
+                        Tier = rolledTier, Attribute = stats.Attribute,
+                        BaseYield = stats.BaseYield, Cooldown = stats.Cooldown
+                    })
+                end
+                
+                -- Give the player a random starting pick (weighted towards worse picks, e.g., 3, 4, or 5)
+                local pickRng = math.random()
+                local userPick = 5
+                if pickRng < 0.1 then userPick = 2 elseif pickRng < 0.3 then userPick = 3 elseif pickRng < 0.6 then userPick = 4 end
+                
+                -- Award their assigned pick
+                DataManager.AddShooterToInventory(player, draftBoard[userPick])
+                
+                -- Save active draft state for Trade Ups
+                DataManager.Set(player, "ActiveDraft", {
+                    Board = draftBoard,
+                    CurrentPick = userPick
+                })
+                
+                -- Return complex object instead of string string
+                return true, HttpService:JSONEncode({ Type = "DraftBoard", Board = draftBoard, UserPick = userPick })
             end
-            
-            return true, rolledTier
         else
             return false, "Not enough Cash!"
         end
@@ -259,14 +302,80 @@ end
 
 
 function ShopManager.Initialize()
+    -- Handle Robux Purchases for the Draft "Trade Up"
+    MarketplaceService.ProcessReceipt = function(receiptInfo)
+        local player = Players:GetPlayerByUserId(receiptInfo.PlayerId)
+        if not player then return Enum.ProductPurchaseDecision.NotProcessedYet end
+        
+        if receiptInfo.ProductId == Config.Monetization.TradeUpProductId then
+            local data = DataManager.Get(player)
+            if data and data.ActiveDraft then
+                local draftState = data.ActiveDraft
+                if draftState.CurrentPick > 1 then
+                    -- Move up 1 slot
+                    draftState.CurrentPick = draftState.CurrentPick - 1
+                    local newPlayerAward = draftState.Board[draftState.CurrentPick]
+                    
+                    -- Award the new player
+                    DataManager.AddShooterToInventory(player, newPlayerAward)
+                    
+                    -- Notify Client
+                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                    local draftUpdateEvent = remotes and remotes:FindFirstChild("DraftUpdate")
+                    if draftUpdateEvent then
+                        draftUpdateEvent:FireClient(player, draftState.CurrentPick, newPlayerAward)
+                    end
+                    
+                    return Enum.ProductPurchaseDecision.PurchaseGranted
+                end
+            end
+        end
+        return Enum.ProductPurchaseDecision.NotProcessedYet
+    end
+
     task.spawn(function()
         local remotes = ReplicatedStorage:WaitForChild("Remotes") :: Folder
         
+        -- Create the DraftUpdate remote event if it doesn't exist
+        local draftUpdateEvent = Instance.new("RemoteEvent")
+        draftUpdateEvent.Name = "DraftUpdate"
+        draftUpdateEvent.Parent = remotes
+
         local buyUpgrade = remotes:WaitForChild("BuyUpgrade") :: RemoteFunction
         local rebirthRequest = remotes:WaitForChild("RebirthRequest") :: RemoteFunction
         
         buyUpgrade.OnServerInvoke = handleBuyUpgrade
         rebirthRequest.OnServerInvoke = handleRebirthRequest
+    end)
+    
+    -- Setup Draft Event Loop
+    local draftActive = Instance.new("BoolValue")
+    draftActive.Name = "DraftActive"
+    draftActive.Value = false
+    draftActive.Parent = ReplicatedStorage
+
+    local draftTimeLeft = Instance.new("IntValue")
+    draftTimeLeft.Name = "DraftTimeLeft"
+    draftTimeLeft.Value = 300 -- 5 minutes initial wait
+    draftTimeLeft.Parent = ReplicatedStorage
+
+    task.spawn(function()
+        while true do
+            task.wait(1)
+            draftTimeLeft.Value -= 1
+            
+            if draftTimeLeft.Value <= 0 then
+                if draftActive.Value then
+                    -- Draft ends, wait 5 mins
+                    draftActive.Value = false
+                    draftTimeLeft.Value = 300
+                else
+                    -- Draft begins, lasts 60 secs
+                    draftActive.Value = true
+                    draftTimeLeft.Value = 60
+                end
+            end
+        end
     end)
     
     print("[Server] ShopManager Initialized!")
