@@ -22,6 +22,11 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
         local currentOwned = player:GetAttribute("Shooter_" .. upgradeName) or 0
         if currentOwned == nil then return false, "Invalid shooter tier" end
         
+        local existingInventoryCount = data.ShooterInventory and #data.ShooterInventory or 0
+        if existingInventoryCount >= (Config.MaxInventorySize or 30) then
+            return false, "Inventory is full! Merge, Trade, or delete players first."
+        end
+        
         local cost = Config.GetShooterCost(upgradeName, currentOwned)
         if currentCash >= cost then
             local stats = Config.RollShooterStats(upgradeName)
@@ -32,7 +37,9 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
                 Tier = upgradeName,
                 Attribute = stats.Attribute,
                 BaseYield = stats.BaseYield,
-                Cooldown = stats.Cooldown
+                Cooldown = stats.Cooldown,
+                Stars = stats.Stars or 1,
+                XP = stats.XP or 0
             }
             
             local existingCount = data.ShooterPositions and #data.ShooterPositions or 0
@@ -98,7 +105,8 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
                 
                 local shooterData = {
                     Id = id, Tier = rolledTier, Attribute = stats.Attribute,
-                    BaseYield = stats.BaseYield, Cooldown = stats.Cooldown
+                    BaseYield = stats.BaseYield, Cooldown = stats.Cooldown,
+                    Stars = stats.Stars or 1, XP = stats.XP or 0
                 }
                 
                 local existingCount = data.ShooterPositions and #data.ShooterPositions or 0
@@ -136,7 +144,8 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
                     table.insert(draftBoard, {
                         Id = HttpService:GenerateGUID(false),
                         Tier = rolledTier, Attribute = stats.Attribute,
-                        BaseYield = stats.BaseYield, Cooldown = stats.Cooldown
+                        BaseYield = stats.BaseYield, Cooldown = stats.Cooldown,
+                        Stars = stats.Stars or 1, XP = stats.XP or 0
                     })
                 end
                 
@@ -248,7 +257,9 @@ local function handleBuyUpgrade(player: Player, upgradeType: string, upgradeName
             Tier = nextTier,
             Attribute = stats.Attribute,
             BaseYield = stats.BaseYield,
-            Cooldown = stats.Cooldown
+            Cooldown = stats.Cooldown,
+            Stars = stats.Stars or 1,
+            XP = stats.XP or 0
         }
         
         DataManager.AddShooterToInventory(player, shooterData)
@@ -348,7 +359,6 @@ function ShopManager.Initialize()
         rebirthRequest.OnServerInvoke = handleRebirthRequest
     end)
     
-    -- Setup Draft Event Loop
     local draftActive = Instance.new("BoolValue")
     draftActive.Name = "DraftActive"
     draftActive.Value = false
@@ -356,25 +366,34 @@ function ShopManager.Initialize()
 
     local draftTimeLeft = Instance.new("IntValue")
     draftTimeLeft.Name = "DraftTimeLeft"
-    draftTimeLeft.Value = 300 -- 5 minutes initial wait
+    draftTimeLeft.Value = 300
     draftTimeLeft.Parent = ReplicatedStorage
+
+    local DRAFT_INTERVAL = 300 -- 5 minutes
+    local DRAFT_DURATION = 60  -- 1 minute
 
     task.spawn(function()
         while true do
-            task.wait(1)
-            draftTimeLeft.Value -= 1
+            local currentEpoch = os.time()
+            local timeWithinInterval = currentEpoch % DRAFT_INTERVAL
             
-            if draftTimeLeft.Value <= 0 then
-                if draftActive.Value then
-                    -- Draft ends, wait 5 mins
-                    draftActive.Value = false
-                    draftTimeLeft.Value = 300
-                else
-                    -- Draft begins, lasts 60 secs
+            if timeWithinInterval < DRAFT_DURATION then
+                -- Active Window (e.g. 7:00:00 to 7:00:59)
+                if not draftActive.Value then
                     draftActive.Value = true
-                    draftTimeLeft.Value = 60
+                    print("[Event] Special Draft has started globally!")
                 end
+                draftTimeLeft.Value = DRAFT_DURATION - timeWithinInterval
+            else
+                -- Waiting Window (e.g. 7:01:00 to 7:04:59)
+                if draftActive.Value then
+                    draftActive.Value = false
+                    print("[Event] Special Draft has ended.")
+                end
+                draftTimeLeft.Value = DRAFT_INTERVAL - timeWithinInterval
             end
+            
+            task.wait(1)
         end
     end)
     

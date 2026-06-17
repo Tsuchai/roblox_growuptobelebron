@@ -1,7 +1,10 @@
 # 🏀 LeBonBon: "Grow Up to be LeBron" - Vision Board
 
-## 🌟 The Core Philosophy
-A simple, hyper-addictive gameplay loop that effortlessly transitions from an active clicking game into a satisfying idle/management experience. Inspired by the frictionless loop of games like *Sell Lemons*.
+## 🌟 The Core Philosophy: "Tycoon Foundation, GM Flavor"
+A simple, hyper-addictive gameplay loop that effortlessly transitions from an active clicking game into a satisfying idle/management experience. 
+
+At its core, it is a **Tycoon**: the numbers go up, you buy upgrades, and you visually see your court and wealth expand. 
+However, the *mechanics* you use to grow that wealth are heavily inspired by **NBA 2K General Manager modes**. You aren't just buying generic "droppers"—you are drafting prospects, analyzing visible "Trade Values," assembling a roster with synergies, and simulating a path to a championship.
 
 ---
 

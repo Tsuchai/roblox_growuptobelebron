@@ -233,10 +233,18 @@ function Config.GetShotStats(distance: number, attributeName: string?): { Accura
     }
 end
 
--- Rolls stats for a newly purchased shooter, applying +/- 10% randomness
-function Config.RollShooterStats(tier: string): { Attribute: string, BaseYield: number, Cooldown: number }
+local starWeights = {
+    Rookie  = { [1]=0.80, [2]=0.15, [3]=0.04, [4]=0.009, [5]=0.001 },
+    College = { [1]=0.10, [2]=0.70, [3]=0.15, [4]=0.04,  [5]=0.01 },
+    Pro     = { [1]=0.05, [2]=0.15, [3]=0.60, [4]=0.15,  [5]=0.05 },
+    AllStar = { [1]=0.01, [2]=0.04, [3]=0.15, [4]=0.70,  [5]=0.10 },
+    LeBron  = { [1]=0.001,[2]=0.009,[3]=0.04, [4]=0.15,  [5]=0.80 }
+}
+
+-- Rolls stats for a newly purchased shooter, applying +/- 10% randomness and Star level scaling
+function Config.RollShooterStats(tier: string): { Attribute: string, BaseYield: number, Cooldown: number, Stars: number, XP: number }
     local shooter = Config.Shooters[tier]
-    if not shooter then return { Attribute = "Slasher", BaseYield = 0, Cooldown = 1 } end
+    if not shooter then return { Attribute = "Slasher", BaseYield = 0, Cooldown = 1, Stars = 1, XP = 0 } end
     
     -- Select Attribute based on chances
     local roll = math.random()
@@ -251,17 +259,38 @@ function Config.RollShooterStats(tier: string): { Attribute: string, BaseYield: 
         end
     end
     
-    -- Randomize stats +/- 10%
+    -- Roll for Stars based on tier weights
+    local starRoll = math.random()
+    local starCumulative = 0
+    local rolledStars = 1
+    local weights = starWeights[tier] or starWeights.Rookie
+    
+    for stars = 1, 5 do
+        starCumulative += weights[stars]
+        if starRoll <= starCumulative then
+            rolledStars = stars
+            break
+        end
+    end
+    
+    -- Star Performance Multiplier:
+    -- A 1-star has 1.0x stats. A 5-star has 2.6x yield and shoots 40% faster.
+    local starYieldMultiplier = 1 + ((rolledStars - 1) * 0.4)
+    local starCooldownMultiplier = 1 - ((rolledStars - 1) * 0.1)
+    
+    -- Randomize stats +/- 10% on top of the star bonus
     local yieldVariance = 0.9 + (math.random() * 0.2)
     local cooldownVariance = 0.9 + (math.random() * 0.2)
     
-    local finalYield = math.max(1, math.floor(shooter.BaseYield * yieldVariance))
-    local finalCooldown = math.max(0.1, shooter.Cooldown * cooldownVariance)
+    local finalYield = math.max(1, math.floor(shooter.BaseYield * yieldVariance * starYieldMultiplier))
+    local finalCooldown = math.max(0.1, shooter.Cooldown * cooldownVariance * starCooldownMultiplier)
     
     return {
         Attribute = selectedAttribute,
         BaseYield = finalYield,
-        Cooldown = finalCooldown
+        Cooldown = finalCooldown,
+        Stars = rolledStars,
+        XP = 0
     }
 end
 

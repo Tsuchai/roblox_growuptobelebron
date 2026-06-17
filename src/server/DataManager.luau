@@ -152,7 +152,9 @@ local function onPlayerAdded(player: Player)
                         Tier = tier,
                         Attribute = stats.Attribute,
                         BaseYield = stats.BaseYield,
-                        Cooldown = stats.Cooldown
+                        Cooldown = stats.Cooldown,
+                        Stars = stats.Stars or 1,
+                        XP = stats.XP or 0
                     })
                 end
             end
@@ -168,7 +170,9 @@ local function onPlayerAdded(player: Player)
                     Tier = tier,
                     Attribute = stats.Attribute,
                     BaseYield = stats.BaseYield,
-                    Cooldown = stats.Cooldown
+                    Cooldown = stats.Cooldown,
+                    Stars = stats.Stars or 1,
+                    XP = stats.XP or 0
                 })
             end
         end

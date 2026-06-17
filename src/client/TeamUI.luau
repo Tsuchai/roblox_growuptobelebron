@@ -56,11 +56,13 @@ local function refreshTeamUI()
                 local tierName = shooterData and shooterData.Tier or posItem.Tier
                 local attr = shooterData and shooterData.Attribute or "Slasher"
                 local yield = shooterData and shooterData.BaseYield or 0
+                local stars = shooterData and shooterData.Stars or 1
                 
                 local cfg = Config.Shooters[tierName]
                 local displayName = cfg and cfg.DisplayName or tierName
+                local starString = string.rep("⭐", stars)
                 
-                slot.NameLabel.Text = displayName .. "\n(" .. attr .. ")"
+                slot.NameLabel.Text = "[" .. starString .. "] " .. displayName .. "\n(" .. attr .. ")"
                 slot.StatusLabel.Text = "$" .. yield .. "/shot - Click to Unequip"
                 slot.Button.BackgroundColor3 = Color3.fromRGB(40, 60, 100) -- Active blue
                 slot.ShooterId = posItem.Id
@@ -162,7 +164,11 @@ local function refreshTeamUI()
             nameLbl.Position = UDim2.new(0.05, 0, 0.1, 0)
             nameLbl.BackgroundTransparency = 1
             nameLbl.Font = Enum.Font.SourceSansBold
-            nameLbl.Text = displayName
+            
+            local stars = item.Stars or 1
+            local starString = string.rep("⭐", stars)
+            nameLbl.Text = "[" .. starString .. "] " .. displayName
+            
             nameLbl.TextColor3 = Color3.new(1, 1, 1)
             nameLbl.TextScaled = true
             nameLbl.TextXAlignment = Enum.TextXAlignment.Left
